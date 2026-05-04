@@ -30,6 +30,7 @@ const inventory = [
 let counts = {};
 let currentCategory = 'wszystkie';
 let currentTotal = 0;
+let lastGeneratedReportID = ""; // Zmienna do przechowywania ID ostatniego raportu
 
 function getFormattedDate() {
     const now = new Date();
@@ -104,7 +105,7 @@ window.generateQuote = function() {
     if (!Object.values(counts).some(c => c > 0)) return showNotice("Lista jest pusta!", "warning");
     if (!employee) return showNotice("Wpisz imię kierowcy!", "warning");
 
-    const reportID = `EXP-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+    lastGeneratedReportID = `EXP-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
     const date = getFormattedDate();
 
     const receiptHTML = `
@@ -112,7 +113,7 @@ window.generateQuote = function() {
             <div class="receipt-header">
                 <h2>EL CARTEL EXPORT</h2>
                 <p class="receipt-meta">Raport sprzedaży przedmiotów</p>
-                <p class="receipt-meta">NR: ${reportID}</p>
+                <p class="receipt-meta">NR: ${lastGeneratedReportID}</p>
                 <p class="receipt-meta">KIEROWCA: ${employee.toUpperCase()}</p>
             </div>
             <div class="receipt-divider"></div>
@@ -164,9 +165,23 @@ async function sendToDiscord() {
         canvas.toBlob(async (blob) => {
             const formData = new FormData();
             formData.append("file", blob, "raport.png");
-            formData.append("payload_json", JSON.stringify({
-                content: `🚛 **NOWY RAPORT SPRZEDAŻY**\n👤 Kierowca: **${employee}**\n💰 Suma: \`${currentTotal}$\``
-            }));
+            
+            const embedPayload = {
+                embeds: [{
+                    title: "🚛 NOWY RAPORT SPRZEDAŻY",
+                    color: 15995922, // Kolor #f39c12 w systemie dziesiętnym
+                    fields: [
+                        { name: "👤 Pracownik:", value: `\`${employee}\``, inline: true },
+                        { name: "📋 Nr raportu:", value: `\`${lastGeneratedReportID}\``, inline: true },
+                        { name: "💰 Suma:", value: `\`${currentTotal}$\``, inline: false }
+                    ],
+                    image: { url: "attachment://raport.png" },
+                    timestamp: new Date().toISOString(),
+                    footer: { text: "System EL CARTEL" }
+                }]
+            };
+
+            formData.append("payload_json", JSON.stringify(embedPayload));
 
             const res = await fetch(DISCORD_WEBHOOK_URL, { method: "POST", body: formData });
             if (res.ok) {
