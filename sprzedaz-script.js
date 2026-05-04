@@ -124,8 +124,7 @@ window.generateQuote = async function() {
             currentEmployeeName = data.name;
             showNotice(`Zalogowano jako: ${currentEmployeeName}`, "success");
             
-            // Czyszczenie pola PIN po poprawnym wygenerowaniu
-            pinInput.value = "";
+            // Usunięto czyszczenie pola PIN, kod zostaje w polu na kolejne transakcje
             
             // Generujemy paragon
             finalizeQuote(currentEmployeeName);
@@ -283,7 +282,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
     
-    // Dodana obsługa ENTER w polu PIN
+    // Obsługa ENTER w polu PIN
     const pinInput = document.getElementById('employee-pin-input');
     if (pinInput) {
         pinInput.addEventListener('keypress', function(e) {
