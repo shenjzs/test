@@ -3,7 +3,7 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches:
-      - main  # Zmień na 'master', jeśli takiej nazwy używasz
+      - main 
 
 permissions:
   contents: write
@@ -17,13 +17,13 @@ jobs:
 
       - name: Inject Webhook URL
         run: |
-          # Zamienia 'MY_SECRET_WEBHOOK_URL' na wartość ze Secretów GitHuba
-          # Używamy innego separatora (|), bo URL zawiera slashe (/)
-          sed -i 's|MY_SECRET_WEBHOOK_URL|${{ secrets.DISCORD_WEBHOOK_URL }}|g' script.js
-        # UWAGA: Upewnij się, że 'script.js' to poprawna nazwa Twojego pliku
+          # Zamieniamy placeholder na sekret o nazwie DISCORD_URL
+          sed -i 's|MY_SECRET_WEBHOOK_URL|${{ secrets.DISCORD_URL }}|g' script.js
+        # WAŻNE: Upewnij się, że Twój plik z kodem to 'script.js'. 
+        # Jeśli ma inną nazwę, zmień ją powyżej.
 
       - name: Deploy to GitHub Pages
         uses: JamesIves/github-pages-deploy-action@v4
         with:
-          folder: . # Folder, w którym jest Twoja strona (zazwyczaj główny)
-          branch: gh-pages # GitHub Actions wypchnie gotowy kod na ten branch
+          folder: . 
+          branch: gh-pages
