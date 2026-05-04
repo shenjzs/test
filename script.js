@@ -54,6 +54,20 @@ function generateID() {
     return res;
 }
 
+// NOWE FUNKCJE: STATYSTYKI PRACOWNIKA
+function getDailyStat(employeeName) {
+    const date = getFormattedDate();
+    const key = `elcartel_stats_${employeeName}_${date}`;
+    return parseFloat(localStorage.getItem(key)) || 0;
+}
+
+function addDailyStat(employeeName, amount) {
+    const date = getFormattedDate();
+    const key = `elcartel_stats_${employeeName}_${date}`;
+    const current = getDailyStat(employeeName);
+    localStorage.setItem(key, current + amount);
+}
+
 function init() {
     const list = document.getElementById('items-list');
     document.getElementById('header-date').innerText = getFormattedDate();
@@ -131,7 +145,6 @@ function applyFilters() {
     }
 }
 
-// Główna funkcja weryfikująca wszystko po kliknięciu Paragon
 async function generateQuote() {
     const hasItems = Object.values(counts).some(c => c > 0);
     const finalPriceInput = document.getElementById('final-price-input');
@@ -168,7 +181,6 @@ async function generateQuote() {
             currentEmployeeName = data.name;
             showNotice(`Zalogowano jako: ${currentEmployeeName}`, "success");
             
-            // Generujemy paragon (PIN zostaje w polu)
             finalizeQuote(currentEmployeeName, finalPrice);
         } else {
             showNotice("Nieprawidłowy PIN!", "danger");
@@ -182,7 +194,6 @@ async function generateQuote() {
     }
 }
 
-// Funkcja generująca samo HTMLowe okno paragonu
 function finalizeQuote(employeeName, finalPrice) {
     const receiptID = generateID();
     document.getElementById('current-receipt-date').innerText = getFormattedDate();
@@ -209,6 +220,24 @@ function finalizeQuote(employeeName, finalPrice) {
     }
     sigDiv.innerHTML = `<span class="signature-label">Podpis pracownika</span><span class="signature-text">${employeeName}</span>`;
 
+    // WYŚWIETLANIE STATYSTYK W MODALU (NOWA, ELEGANCKA WERSJA)
+    const statDiv = document.getElementById('employee-stats-display');
+    if (statDiv) {
+        const currentStat = getDailyStat(employeeName);
+        const predictedStat = currentStat + finalPrice;
+        
+        statDiv.innerHTML = `
+            <div class="stat-box-inner">
+                <div class="stat-icon"><i class="fas fa-wallet"></i></div>
+                <div class="stat-details">
+                    <span class="stat-label">Twój dzisiejszy obrót</span>
+                    <span class="stat-value">${predictedStat}$</span>
+                </div>
+            </div>
+        `;
+        statDiv.style.display = "block";
+    }
+
     document.getElementById('quote-modal').classList.add('active');
 }
 
@@ -218,7 +247,8 @@ async function sendToDiscord() {
     
     const receiptID = document.getElementById('receipt-id-display').innerText.replace('NR: ', '');
     const employee = currentEmployeeName; 
-    const finalPrice = document.getElementById('receipt-total').innerText;
+    const finalPriceText = document.getElementById('receipt-total').innerText;
+    const finalPriceNumeric = parseFloat(finalPriceText.replace('$', ''));
 
     btn.disabled = true;
     btn.innerText = "Wysyłanie...";
@@ -236,7 +266,7 @@ async function sendToDiscord() {
                     fields: [
                         { name: "📋 Numer paragonu:", value: `\`${receiptID}\``, inline: true },
                         { name: "👤 Pracownik:", value: `**${employee}**`, inline: true },
-                        { name: "💰 Suma:", value: `**${finalPrice}**`, inline: false }
+                        { name: "💰 Suma:", value: `**${finalPriceText}**`, inline: false }
                     ],
                     image: { url: "attachment://paragon.png" },
                     timestamp: new Date().toISOString(),
@@ -248,6 +278,7 @@ async function sendToDiscord() {
             
             const res = await fetch(DISCORD_WEBHOOK_URL, { method: "POST", body: formData });
             if (res.ok) {
+                addDailyStat(currentEmployeeName, finalPriceNumeric);
                 showNotice("Wysłano na Discord!", "success");
                 closeModal();
             } else throw new Error();
@@ -278,7 +309,13 @@ async function copyReceiptToClipboard() {
             try {
                 const data = [new ClipboardItem({ [blob.type]: blob })];
                 await navigator.clipboard.write(data);
+                
+                const finalPriceText = document.getElementById('receipt-total').innerText;
+                const finalPriceNumeric = parseFloat(finalPriceText.replace('$', ''));
+                addDailyStat(currentEmployeeName, finalPriceNumeric);
+
                 showNotice("Skopiowano paragon do schowka!", "success");
+                closeModal();
             } catch (err) {
                 showNotice("Błąd kopiowania! Spróbuj innej przeglądarki.", "danger");
             }
