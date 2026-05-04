@@ -24,8 +24,6 @@ const inventory = [
     { name: "Głośnik", price: 180, category: "elektronika" },
     { name: "Telewizor", price: 750, category: "elektronika" },
     { name: "Zegarek", price: 200, category: "biżuteria" },
-    //{ name: "Złota bransoletka", price: 500, category: "biżuteria" },//
-    //{ name: "Złote kolczyki", price: 500, category: "biżuteria" },//
     { name: "Stary popsuty telefon", price: 110, category: "elektronika" }
 ];
 
@@ -94,7 +92,7 @@ function applyFilters() {
     const term = document.getElementById('search-input').value.toLowerCase();
     document.querySelectorAll('.item-card').forEach(card => {
         const match = card.getAttribute('data-name').includes(term) && 
-                     (currentCategory === 'wszystkie' || card.getAttribute('data-category') === currentCategory);
+                      (currentCategory === 'wszystkie' || card.getAttribute('data-category') === currentCategory);
         card.classList.toggle('hidden', !match);
     });
 }
@@ -109,7 +107,6 @@ window.generateQuote = function() {
     const reportID = `EXP-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
     const date = getFormattedDate();
 
-    // HTML PARAGONU
     const receiptHTML = `
         <div class="receipt">
             <div class="receipt-header">
@@ -197,6 +194,22 @@ function showNotice(msg, type) {
     t.innerText = msg;
     container.appendChild(t);
     setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 500); }, 3000);
+}
+
+// FUNKCJA ZWIJANIA PASKA NA MOBILE
+window.toggleSummary = function() {
+    const bar = document.getElementById('summary-bar');
+    const icon = document.getElementById('toggle-icon');
+    
+    if (bar && icon) {
+        bar.classList.toggle('open');
+        
+        if (bar.classList.contains('open')) {
+            icon.classList.replace('fa-chevron-up', 'fa-chevron-down');
+        } else {
+            icon.classList.replace('fa-chevron-down', 'fa-chevron-up');
+        }
+    }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
