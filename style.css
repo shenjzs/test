@@ -573,10 +573,13 @@ header p {
     gap: 20px;
 }
 
-/* Wygląd samego paragonu */
+/* Wygląd samego paragonu - POPRAWKA UCINANIA */
 #receipt-capture-area {
     padding: 10px;
     background: transparent;
+    width: fit-content;      /* Ważne dla html2canvas */
+    height: fit-content;     /* Ważne dla html2canvas */
+    display: block;          /* Stabilizacja */
 }
 
 .receipt {
@@ -588,6 +591,7 @@ header p {
     box-shadow: 0 20px 60px rgba(0,0,0,0.5);
     font-family: 'Courier New', Courier, monospace;
     position: relative;
+    overflow: visible;      /* Zapobiega ucinaniu cieni i pieczątek */
 }
 
 .receipt-header {
@@ -790,4 +794,14 @@ header p {
 /* KLUCZOWA POPRAWKA - UKRYWANIE PASKA PRZY OTWARTYM MODALU */
 body:has(.modal.active) .summary-bar {
     display: none !important;
+}
+
+/* NAPRAWA UCINANIA NA DISCORDZIE (MOBILE) */
+.modal-content {
+    max-height: 95vh;
+    overflow-y: auto;
+}
+
+#receipt-capture-area {
+    background: white; /* Zapobiega przezroczystości tła */
 }
