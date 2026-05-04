@@ -1,8 +1,7 @@
 // ==========================================
 // KONFIGURACJA
 // ==========================================
-const DISCORD_WEBHOOK_URL = "MY_SECRET_WEBHOOK_URL"; 
-
+const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1500540604827046078/_uzuOq6EK9Ip0XggKscXNsmPRZrl4EdmBSLcWcMRaavI0wimpqkxWIRn8TrELISJ6RZQ";
 const inventory = [
     { name: "Zdobiona książka", min: 120, max: 120, category: "inne" },
     { name: "Dywan", min: 240, max: 240, category: "dom" },
