@@ -696,6 +696,14 @@ header p {
     width: 100%;
 }
 
+.pin-input {
+    width: 100%;
+    text-align: center;
+    letter-spacing: 5px;
+    font-size: 1.1rem;
+    margin-bottom: 5px;
+}
+
 .discord-btn {
     background: #5865F2;
     color: white;
@@ -752,7 +760,8 @@ header p {
     display: flex;
     flex-direction: column;
     gap: 15px;
-    z-index: 4000;
+    /* PODBITY Z-INDEX ABY POWIADOMIENIA BYŁY NAD PARAGONEM */
+    z-index: 100000;
 }
 
 .toast {
@@ -761,7 +770,9 @@ header p {
     padding: 20px 30px;
     border-radius: 12px;
     color: white;
-    box-shadow: 0 15px 35px rgba(0,0,0,0.4);
+    /* MOCNIEJSZY CIEŃ I RAMKA DLA KONTRASTU Z BIAŁYM PARAGONEM */
+    box-shadow: 0 15px 35px rgba(0,0,0,0.6);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     display: flex;
     align-items: center;
     gap: 15px;

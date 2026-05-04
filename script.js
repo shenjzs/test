@@ -1,7 +1,9 @@
 // ==========================================
 // KONFIGURACJA
 // ==========================================
-const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1500540604827046078/_uzuOq6EK9Ip0XggKscXNsmPRZrl4EdmBSLcWcMRaavI0wimpqkxWIRn8TrELISJ6RZQ";
+const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1500540604827046078/_uzuOq6EK9Ip0XggKscXNsmPRZrl4EdmBSLcWcMRaavI0wimpqkxWIRn8TrELISJ6RZQ"; 
+const GOOGLE_SHEETS_URL = "https://script.google.com/macros/s/AKfycbycnbsg8yC8Cqk0tF-6syzBTvTLvO-MyTgx-zqAPjgBXPR132MicKNtjNoq3WMQfmLR/exec";
+
 const inventory = [
     { name: "Zdobiona książka", min: 120, max: 120, category: "inne" },
     { name: "Dywan", min: 240, max: 240, category: "dom" },
@@ -35,6 +37,7 @@ let counts = {};
 let currentCategory = 'wszystkie';
 let currentMinTotal = 0; 
 let currentMaxTotal = 0; 
+let currentEmployeeName = ""; // Zmienna trzymająca imię pracownika
 
 function getFormattedDate() {
     const now = new Date();
@@ -128,14 +131,15 @@ function applyFilters() {
     }
 }
 
-function generateQuote() {
+// Główna funkcja weryfikująca wszystko po kliknięciu Paragon
+async function generateQuote() {
     const hasItems = Object.values(counts).some(c => c > 0);
     const finalPriceInput = document.getElementById('final-price-input');
     const finalPrice = parseFloat(finalPriceInput.value);
-    const employee = document.getElementById('employee-name-input').value;
+    const pinInput = document.getElementById('employee-pin-input');
+    const pin = pinInput ? pinInput.value : "";
 
     if (!hasItems) return showNotice("Koszyk jest pusty!", "warning");
-    if (!employee) return showNotice("Wpisz imię pracownika!", "warning");
     
     if (isNaN(finalPrice)) {
         return showNotice("Wpisz kwotę transakcji!", "danger");
@@ -149,10 +153,44 @@ function generateQuote() {
         return showNotice(`Kwota zbyt wysoka! Maksimum to ${currentMaxTotal}$.`, "danger");
     }
 
+    if (!pin) return showNotice("Wprowadź PIN pracownika!", "warning");
+
+    const btn = document.getElementById('quote-btn');
+    const originalBtnHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Weryfikacja...';
+
+    try {
+        const response = await fetch(`${GOOGLE_SHEETS_URL}?pin=${pin}`);
+        const data = await response.json();
+
+        if (data.isValid) {
+            currentEmployeeName = data.name;
+            showNotice(`Zalogowano jako: ${currentEmployeeName}`, "success");
+            
+            // Czyszczenie pola PIN po poprawnym wygenerowaniu
+            pinInput.value = "";
+            
+            // Generujemy paragon
+            finalizeQuote(currentEmployeeName, finalPrice);
+        } else {
+            showNotice("Nieprawidłowy PIN!", "danger");
+        }
+    } catch (error) {
+        showNotice("Błąd połączenia z bazą PIN!", "danger");
+        console.error(error);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalBtnHtml;
+    }
+}
+
+// Funkcja generująca samo HTMLowe okno paragonu
+function finalizeQuote(employeeName, finalPrice) {
     const receiptID = generateID();
     document.getElementById('current-receipt-date').innerText = getFormattedDate();
     document.getElementById('receipt-id-display').innerText = `NR: ${receiptID}`;
-    document.getElementById('receipt-employee-display').innerText = `PRAC.: ${employee.toUpperCase()}`;
+    document.getElementById('receipt-employee-display').innerText = `PRAC.: ${employeeName.toUpperCase()}`;
     document.getElementById('receipt-total').innerText = finalPrice + '$';
 
     const itemsDiv = document.getElementById('receipt-items');
@@ -172,7 +210,7 @@ function generateQuote() {
         sigDiv.className = 'receipt-signature';
         itemsDiv.parentNode.insertBefore(sigDiv, document.querySelector('.receipt-footer'));
     }
-    sigDiv.innerHTML = `<span class="signature-label">Podpis pracownika</span><span class="signature-text">${employee}</span>`;
+    sigDiv.innerHTML = `<span class="signature-label">Podpis pracownika</span><span class="signature-text">${employeeName}</span>`;
 
     document.getElementById('quote-modal').classList.add('active');
 }
@@ -182,23 +220,22 @@ async function sendToDiscord() {
     const area = document.getElementById('receipt-capture-area');
     
     const receiptID = document.getElementById('receipt-id-display').innerText.replace('NR: ', '');
-    const employee = document.getElementById('employee-name-input').value;
+    const employee = currentEmployeeName; // Korzysta ze zmiennej globalnej ustalonej po wpisaniu PINu
     const finalPrice = document.getElementById('receipt-total').innerText;
 
     btn.disabled = true;
     btn.innerText = "Wysyłanie...";
 
     try {
-        const canvas = await html2canvas(area, { scale: 2, backgroundColor: "#ffffff" });
+        const canvas = await html2canvas(area, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
         canvas.toBlob(async (blob) => {
             const formData = new FormData();
             formData.append("file", blob, "paragon.png");
             
-            // Definicja Embed dla Discorda
             const embedPayload = {
                 embeds: [{
                     title: "📑 Wystawiono nowy paragon!",
-                    color: 36991, // Jasnoniebieski kolor boczny
+                    color: 36991, 
                     fields: [
                         { name: "📋 Numer paragonu:", value: `\`${receiptID}\``, inline: true },
                         { name: "👤 Pracownik:", value: `**${employee}**`, inline: true },
@@ -222,11 +259,10 @@ async function sendToDiscord() {
         showNotice("Błąd Webhooka!", "danger");
     } finally {
         btn.disabled = false;
-        btn.innerText = "Wyślij na Discord";
+        btn.innerHTML = '<i class="fab fa-discord"></i> Wyślij na Discord';
     }
 }
 
-// NOWA FUNKCJA KOPIOWANIA DO SCHOWKA
 async function copyReceiptToClipboard() {
     const btn = document.getElementById('copy-receipt-btn');
     const area = document.getElementById('receipt-capture-area');
@@ -308,5 +344,12 @@ document.getElementById('reset-btn').onclick = () => {
 document.getElementById('send-discord-btn').onclick = sendToDiscord;
 document.getElementById('copy-receipt-btn').onclick = copyReceiptToClipboard;
 document.getElementById('search-input').addEventListener('input', applyFilters);
+
+// Nasłuchiwanie klawisza Enter w polach PIN i Kwota
+const triggerGenerateQuote = function(e) {
+    if (e.key === 'Enter') generateQuote();
+};
+document.getElementById('employee-pin-input').addEventListener('keypress', triggerGenerateQuote);
+document.getElementById('final-price-input').addEventListener('keypress', triggerGenerateQuote);
 
 init();

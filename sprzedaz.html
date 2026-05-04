@@ -6,11 +6,8 @@
     <title>El Cartel | Panel eksportu</title>
     <link rel="stylesheet" href="style-sprzedaz.css">
     <link rel="icon" type="image/x-icon" href="favicon.ico">
-    <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet">
-    <!-- Font Awesome dla ikon -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Biblioteka do generowania zdjęć -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </head>
 <body>
@@ -70,8 +67,9 @@
 
         <div class="actions">
             <div class="input-wrapper" style="position: relative; display: flex; align-items: center;">
-                <i class="fas fa-user-tag" style="position: absolute; left: 15px; color: var(--text-secondary);"></i>
-                <input type="text" id="employee-name-input" class="custom-input" placeholder="Imię i Nazwisko" style="padding-left: 45px;" required>
+                <i class="fas fa-lock" style="position: absolute; left: 15px; color: var(--text-secondary);"></i>
+                <!-- Aktywne pole do wpisywania PINu bezpośrednio w pasku -->
+                <input type="password" id="employee-pin-input" class="custom-input" placeholder="Wpisz PIN" style="padding-left: 45px; letter-spacing: 3px;" required>
             </div>
             
             <div class="button-group" style="display: flex; gap: 10px;">

@@ -1,10 +1,13 @@
-const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1500866982113837188/v2P-7KKvXPsGwd1L8pQ0KSAvQTY46EDpDX7tRrkORv2uymTFfV1UjWt8NeldD5zfonvu"; 
+const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1500573620605550725/VmpdLB3qN1FT6Jkf-U-Wo1cig-WEpVjleki4f-EA45G5QfSuBJeC3f1fqCKB_LTeXOQ5"; 
+
+// UWAGA: WKLEJ TUTAJ SWÓJ ADRES URL GOOGLE SHEETS
+const GOOGLE_SHEETS_URL = "https://script.google.com/macros/s/AKfycbycnbsg8yC8Cqk0tF-6syzBTvTLvO-MyTgx-zqAPjgBXPR132MicKNtjNoq3WMQfmLR/exec"; 
 
 const inventory = [
     { name: "Zdobiona książka", price: 150, category: "inne" },
     { name: "Dywan", price: 300, category: "dom" },
     { name: "Komputer (laptop)", price: 750, category: "elektronika" },
-    { name: "Komputer (stacjonarny)", price: 1700, category: "elektronika" },
+    { name: "Komputer (stacjonarny)", price: 850, category: "elektronika" },
     { name: "Konsola", price: 500, category: "elektronika" },
     { name: "Konsola DJ", price: 800, category: "elektronika" },
     { name: "Kobieca plastikowa figurka", price: 120, category: "inne" },
@@ -30,7 +33,8 @@ const inventory = [
 let counts = {};
 let currentCategory = 'wszystkie';
 let currentTotal = 0;
-let lastGeneratedReportID = ""; // Zmienna do przechowywania ID ostatniego raportu
+let lastGeneratedReportID = ""; 
+let currentEmployeeName = ""; // Globalna zmienna przechowująca imię po autoryzacji
 
 function getFormattedDate() {
     const now = new Date();
@@ -98,13 +102,46 @@ function applyFilters() {
     });
 }
 
-window.generateQuote = function() {
-    const employeeInput = document.getElementById('employee-name-input');
-    const employee = employeeInput ? employeeInput.value : "";
-    
+// LOGIKA WERYFIKACJI PIN BEZPOŚREDNIO Z PASKA
+window.generateQuote = async function() {
     if (!Object.values(counts).some(c => c > 0)) return showNotice("Lista jest pusta!", "warning");
-    if (!employee) return showNotice("Wpisz imię kierowcy!", "warning");
+    
+    const pinInput = document.getElementById('employee-pin-input');
+    const pin = pinInput ? pinInput.value : "";
 
+    if (!pin) return showNotice("Wprowadź PIN!", "warning");
+
+    const btn = document.querySelector('.quote-button');
+    const originalBtnHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Weryfikacja...';
+
+    try {
+        const response = await fetch(`${GOOGLE_SHEETS_URL}?pin=${pin}`);
+        const data = await response.json();
+
+        if (data.isValid) {
+            currentEmployeeName = data.name;
+            showNotice(`Zalogowano jako: ${currentEmployeeName}`, "success");
+            
+            // Czyszczenie pola PIN po poprawnym wygenerowaniu
+            pinInput.value = "";
+            
+            // Generujemy paragon
+            finalizeQuote(currentEmployeeName);
+        } else {
+            showNotice("Nieprawidłowy PIN!", "danger");
+        }
+    } catch (error) {
+        showNotice("Błąd połączenia z bazą PIN!", "danger");
+        console.error(error);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalBtnHtml;
+    }
+}
+
+window.finalizeQuote = function(employeeName) {
     lastGeneratedReportID = `EXP-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
     const date = getFormattedDate();
 
@@ -114,7 +151,7 @@ window.generateQuote = function() {
                 <h2>EL CARTEL EXPORT</h2>
                 <p class="receipt-meta">Raport sprzedaży przedmiotów</p>
                 <p class="receipt-meta">NR: ${lastGeneratedReportID}</p>
-                <p class="receipt-meta">KIEROWCA: ${employee.toUpperCase()}</p>
+                <p class="receipt-meta">KIEROWCA: ${employeeName.toUpperCase()}</p>
             </div>
             <div class="receipt-divider"></div>
             <div class="receipt-items-list">
@@ -148,7 +185,6 @@ window.generateQuote = function() {
 async function sendToDiscord() {
     const btn = document.getElementById('send-discord-btn');
     const area = document.getElementById('receipt-capture-area');
-    const employee = document.getElementById('employee-name-input').value;
 
     if (!area) return;
 
@@ -169,15 +205,15 @@ async function sendToDiscord() {
             const embedPayload = {
                 embeds: [{
                     title: "🚛 NOWY RAPORT SPRZEDAŻY",
-                    color: 15995922, // Kolor #f39c12 w systemie dziesiętnym
+                    color: 15995922,
                     fields: [
-                        { name: "👤 Pracownik:", value: `\`${employee}\``, inline: true },
+                        { name: "👤 Pracownik:", value: `\`${currentEmployeeName}\``, inline: true },
                         { name: "📋 Nr raportu:", value: `\`${lastGeneratedReportID}\``, inline: true },
                         { name: "💰 Suma:", value: `\`${currentTotal}$\``, inline: false }
                     ],
                     image: { url: "attachment://raport.png" },
                     timestamp: new Date().toISOString(),
-                    footer: { text: "System EL CARTEL" }
+                    footer: { text: "System EL CARTEL PAWN SHOP" }
                 }]
             };
 
@@ -245,5 +281,15 @@ document.addEventListener('DOMContentLoaded', () => {
             calculateTotal();
             showNotice("Wyczyszczono listę!", "warning");
         };
+    }
+    
+    // Dodana obsługa ENTER w polu PIN
+    const pinInput = document.getElementById('employee-pin-input');
+    if (pinInput) {
+        pinInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                generateQuote();
+            }
+        });
     }
 });

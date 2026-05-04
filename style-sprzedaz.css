@@ -493,3 +493,11 @@ header h1 {
         grid-template-columns: 1fr;
     }
 }
+
+/* DODANE DLA SYSTEMU PIN */
+#pin-input:focus {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 4px rgba(243, 156, 18, 0.2);
+    outline: none;
+    color: var(--accent-color);
+}
