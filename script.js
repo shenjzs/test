@@ -37,7 +37,7 @@ let counts = {};
 let currentCategory = 'wszystkie';
 let currentMinTotal = 0; 
 let currentMaxTotal = 0; 
-let currentEmployeeName = ""; // Zmienna trzymająca imię pracownika
+let currentEmployeeName = ""; 
 
 function getFormattedDate() {
     const now = new Date();
@@ -168,10 +168,7 @@ async function generateQuote() {
             currentEmployeeName = data.name;
             showNotice(`Zalogowano jako: ${currentEmployeeName}`, "success");
             
-            // Czyszczenie pola PIN po poprawnym wygenerowaniu
-            pinInput.value = "";
-            
-            // Generujemy paragon
+            // Generujemy paragon (PIN zostaje w polu)
             finalizeQuote(currentEmployeeName, finalPrice);
         } else {
             showNotice("Nieprawidłowy PIN!", "danger");
@@ -220,7 +217,7 @@ async function sendToDiscord() {
     const area = document.getElementById('receipt-capture-area');
     
     const receiptID = document.getElementById('receipt-id-display').innerText.replace('NR: ', '');
-    const employee = currentEmployeeName; // Korzysta ze zmiennej globalnej ustalonej po wpisaniu PINu
+    const employee = currentEmployeeName; 
     const finalPrice = document.getElementById('receipt-total').innerText;
 
     btn.disabled = true;
@@ -345,7 +342,6 @@ document.getElementById('send-discord-btn').onclick = sendToDiscord;
 document.getElementById('copy-receipt-btn').onclick = copyReceiptToClipboard;
 document.getElementById('search-input').addEventListener('input', applyFilters);
 
-// Nasłuchiwanie klawisza Enter w polach PIN i Kwota
 const triggerGenerateQuote = function(e) {
     if (e.key === 'Enter') generateQuote();
 };
