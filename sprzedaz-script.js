@@ -1,4 +1,4 @@
-const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1500573620605550725/VmpdLB3qN1FT6Jkf-U-Wo1cig-WEpVjleki4f-EA45G5QfSuBJeC3f1fqCKB_LTeXOQ5"; 
+const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1500866982113837188/v2P-7KKvXPsGwd1L8pQ0KSAvQTY46EDpDX7tRrkORv2uymTFfV1UjWt8NeldD5zfonvu"; 
 
 const inventory = [
     { name: "Zdobiona książka", price: 150, category: "inne" },
