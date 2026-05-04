@@ -227,6 +227,38 @@ async function sendToDiscord() {
     }
 }
 
+// NOWA FUNKCJA KOPIOWANIA DO SCHOWKA
+async function copyReceiptToClipboard() {
+    const btn = document.getElementById('copy-receipt-btn');
+    const area = document.getElementById('receipt-capture-area');
+    
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generowanie...';
+
+    try {
+        const canvas = await html2canvas(area, { 
+            scale: 2, 
+            backgroundColor: "#ffffff",
+            useCORS: true 
+        });
+        
+        canvas.toBlob(async (blob) => {
+            try {
+                const data = [new ClipboardItem({ [blob.type]: blob })];
+                await navigator.clipboard.write(data);
+                showNotice("Skopiowano paragon do schowka!", "success");
+            } catch (err) {
+                showNotice("Błąd kopiowania! Spróbuj innej przeglądarki.", "danger");
+            }
+        });
+    } catch (e) {
+        showNotice("Błąd generowania obrazu!", "danger");
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-copy"></i> Wydaj paragon klientowi';
+    }
+}
+
 function updateAdPreview() {
     const input = document.getElementById('ad-input').value;
     const preview = document.getElementById('ad-preview');
@@ -275,6 +307,7 @@ document.getElementById('reset-btn').onclick = () => {
 };
 
 document.getElementById('send-discord-btn').onclick = sendToDiscord;
+document.getElementById('copy-receipt-btn').onclick = copyReceiptToClipboard;
 document.getElementById('search-input').addEventListener('input', applyFilters);
 
 init();
