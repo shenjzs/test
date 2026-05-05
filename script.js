@@ -129,7 +129,7 @@ window.toggleCart = function() {
     if (sidebar) sidebar.classList.toggle('active');
 };
 
-// NOWA FUNKCJA: Aktualizacja zawartości koszyka
+// ZMODYFIKOWANA FUNKCJA: Aktualizacja zawartości koszyka (+/- przyciski wewnatrz)
 function updateCartView() {
     const container = document.getElementById('cart-items-container');
     const badge = document.getElementById('cart-badge');
@@ -149,7 +149,11 @@ function updateCartView() {
                 <div class="cart-item">
                     <div class="cart-item-info-col">
                         <span class="cart-item-name">${item.name}</span>
-                        <span class="cart-item-qty">Ilość: ${counts[index]}</span>
+                        <div class="cart-controls">
+                            <button class="cart-btn-circle minus" onclick="updateCount(${index}, -1)">-</button>
+                            <span class="cart-item-qty">${counts[index]}</span>
+                            <button class="cart-btn-circle plus" onclick="updateCount(${index}, 1)">+</button>
+                        </div>
                     </div>
                     <div class="cart-item-price-col">${priceText}</div>
                 </div>
