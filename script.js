@@ -29,6 +29,7 @@ const inventory = [
     { name: "Telewizor", min: 570, max: 600, category: "elektronika" },
     { name: "Zegarek", min: 140, max: 160, category: "biżuteria" },
     { name: "Złota bransoletka", min: 200, max: 200, category: "biżuteria" },
+    { name: "Złota moneta", min: 50, max: 50, category: "inne" },
     { name: "Złote kolczyki", min: 200, max: 200, category: "biżuteria" },
     { name: "Popsuty telefon", min: 90, max: 95, category: "elektronika" }
 ];
@@ -93,6 +94,7 @@ function init() {
     });
     document.getElementById('ad-input').addEventListener('input', updateAdPreview);
     updateAdPreview();
+    updateCartView(); // Wywołanie przy starcie dla pustego koszyka
 }
 
 function updateCount(index, change) {
@@ -116,6 +118,52 @@ function calculateTotal() {
     currentMaxTotal = max; 
     document.getElementById('total-price').innerText = min + '$';
     document.getElementById('bonus-range').innerText = '+' + (max - min) + '$';
+    
+    // Aktualizacja widoku koszyka bocznego
+    updateCartView();
+}
+
+// NOWA FUNKCJA: Włączanie i wyłączanie koszyka
+window.toggleCart = function() {
+    const sidebar = document.getElementById('cart-sidebar');
+    if (sidebar) sidebar.classList.toggle('active');
+};
+
+// NOWA FUNKCJA: Aktualizacja zawartości koszyka
+function updateCartView() {
+    const container = document.getElementById('cart-items-container');
+    const badge = document.getElementById('cart-badge');
+    const sidebarTotal = document.getElementById('cart-sidebar-total');
+    
+    let totalItems = 0;
+    let html = '';
+
+    inventory.forEach((item, index) => {
+        if (counts[index] > 0) {
+            totalItems += counts[index];
+            let itemTotalMin = item.min * counts[index];
+            let itemTotalMax = item.max * counts[index];
+            let priceText = item.min === item.max ? `${itemTotalMin}$` : `${itemTotalMin}$ - ${itemTotalMax}$`;
+            
+            html += `
+                <div class="cart-item">
+                    <div class="cart-item-info-col">
+                        <span class="cart-item-name">${item.name}</span>
+                        <span class="cart-item-qty">Ilość: ${counts[index]}</span>
+                    </div>
+                    <div class="cart-item-price-col">${priceText}</div>
+                </div>
+            `;
+        }
+    });
+
+    if (totalItems === 0) {
+        html = '<div class="empty-cart-msg">Koszyk jest pusty</div>';
+    }
+
+    if (container) container.innerHTML = html;
+    if (badge) badge.innerText = totalItems;
+    if (sidebarTotal) sidebarTotal.innerText = currentMinTotal + '$' + (currentMaxTotal > currentMinTotal ? ` - ${currentMaxTotal}$` : '');
 }
 
 function filterCategory(cat, btn) {
