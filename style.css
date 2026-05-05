@@ -428,6 +428,32 @@ header p {
 }
 
 /* ==========================================================================
+   PRZYCISK "DODAJ PUSTE POLE"
+   ========================================================================== */
+.add-custom-slot-btn {
+    background: rgba(56, 189, 248, 0.1);
+    border: 1px dashed var(--accent-color);
+    color: var(--accent-color);
+    padding: 10px 20px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-weight: 700;
+    transition: var(--transition-normal);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.add-custom-slot-btn:hover {
+    background: var(--accent-color);
+    color: var(--bg-color);
+    box-shadow: 0 5px 15px rgba(56, 189, 248, 0.3);
+}
+
+/* ==========================================================================
    LISTA PRZEDMIOTÓW (GRID)
    ========================================================================== */
 .items-grid {
@@ -458,6 +484,50 @@ header p {
     border-color: var(--accent-color);
     background: #24334d;
     box-shadow: var(--shadow-lg);
+}
+
+/* STYLE DLA WŁASNEGO PRZEDMIOTU */
+.custom-card-special {
+    border: 1px dashed var(--accent-color);
+    background: rgba(56, 189, 248, 0.05);
+}
+
+.custom-item-name, .custom-item-price {
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 8px 12px;
+    border-radius: 8px;
+    outline: none;
+    transition: var(--transition-fast);
+    font-family: 'Inter', sans-serif;
+}
+
+.custom-item-name {
+    width: 100%;
+    margin-bottom: 8px;
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+.custom-item-price {
+    width: 100px;
+    color: var(--accent-color);
+    font-weight: 700;
+}
+
+.custom-item-name:focus, .custom-item-price:focus {
+    border-color: var(--accent-color);
+}
+
+/* KOD DO UKRYCIA STRZAŁEK W POLU CENY */
+.custom-item-price::-webkit-inner-spin-button,
+.custom-item-price::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+.custom-item-price {
+    -moz-appearance: textfield;
 }
 
 .item-info {
