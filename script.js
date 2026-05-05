@@ -433,4 +433,20 @@ const triggerGenerateQuote = function(e) {
 document.getElementById('employee-pin-input').addEventListener('keypress', triggerGenerateQuote);
 document.getElementById('final-price-input').addEventListener('keypress', triggerGenerateQuote);
 
+// FUNKCJA ZWIJANIA PASKA NA MOBILE
+window.toggleSummary = function() {
+    const bar = document.getElementById('summary-bar');
+    const icon = document.getElementById('toggle-icon');
+    
+    if (bar && icon) {
+        bar.classList.toggle('open');
+        
+        if (bar.classList.contains('open')) {
+            icon.classList.replace('fa-chevron-up', 'fa-chevron-down');
+        } else {
+            icon.classList.replace('fa-chevron-down', 'fa-chevron-up');
+        }
+    }
+}
+
 init();
