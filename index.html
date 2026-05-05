@@ -92,7 +92,12 @@
 
         <div id="items-list" class="items-grid"></div>
 
-        <div class="summary-bar">
+        <div id="summary-bar" class="summary-bar">
+            <!-- PRZYCISK ZWIJANIA (WIDOCZNY TYLKO NA MOBILE) -->
+            <div class="mobile-toggle-btn" onclick="toggleSummary()">
+                <i id="toggle-icon" class="fas fa-chevron-up"></i>
+            </div>
+
             <div class="summary-info">
                 <div class="total-group">
                     <span class="total-label">Suma (minimum):</span>
@@ -172,7 +177,7 @@
     <!-- PANEL BOCZNY KOSZYKA -->
     <div id="cart-sidebar" class="cart-sidebar">
         <div class="cart-header">
-            <h2><i class="fas fa-shopping-cart"></i> Twój koszyk</h2>
+            <h2><i class="fas fa-shopping-cart"></i> Twój Koszyk</h2>
             <button id="close-cart-btn" class="close-btn-cart" onclick="toggleCart()"><i class="fas fa-times"></i></button>
         </div>
         <div id="cart-items-container" class="cart-items-container">
