@@ -39,6 +39,8 @@ let currentCategory = 'wszystkie';
 let currentMinTotal = 0; 
 let currentMaxTotal = 0; 
 let currentEmployeeName = ""; 
+// BLOKADA PODWÓJNEGO NALICZANIA UTARGU
+let isStatAddedForCurrentReceipt = false;
 
 function getFormattedDate() {
     const now = new Date();
@@ -79,22 +81,94 @@ function init() {
         card.className = 'item-card';
         card.setAttribute('data-category', item.category);
         card.setAttribute('data-name', item.name.toLowerCase());
-        card.innerHTML = `
-            <div class="item-info">
-                <span class="item-name">${item.name}</span>
-                <span class="item-price">${item.min === item.max ? item.min + '$' : item.min + '$ - ' + item.max + '$'}</span>
-            </div>
-            <div class="controls">
-                <button class="btn-circle minus" onclick="updateCount(${index}, -1)">-</button>
-                <input type="number" id="count-${index}" class="quantity-input" value="0" min="0" oninput="handleInput(${index}, this.value)">
-                <button class="btn-circle plus" onclick="updateCount(${index}, 1)">+</button>
-            </div>
-        `;
+        
+        if (item.isCustom) {
+            card.classList.add('custom-card-special');
+            card.innerHTML = `
+                <div class="item-info" style="width: 60%;">
+                    <input type="text" id="custom-name-${index}" class="custom-item-name" placeholder="Produkt" oninput="updateCustomName(${index}, this.value)">
+                    <input type="number" id="custom-price-${index}" class="custom-item-price" placeholder="Cena $" min="0" oninput="updateCustomPrice(${index}, this.value)">
+                </div>
+                <div class="controls">
+                    <button class="btn-circle minus" onclick="updateCount(${index}, -1)">-</button>
+                    <input type="number" id="count-${index}" class="quantity-input" value="0" min="0" oninput="handleInput(${index}, this.value)">
+                    <button class="btn-circle plus" onclick="updateCount(${index}, 1)">+</button>
+                </div>
+            `;
+        } else {
+            card.innerHTML = `
+                <div class="item-info">
+                    <span class="item-name">${item.name}</span>
+                    <span class="item-price">${item.min === item.max ? item.min + '$' : item.min + '$ - ' + item.max + '$'}</span>
+                </div>
+                <div class="controls">
+                    <button class="btn-circle minus" onclick="updateCount(${index}, -1)">-</button>
+                    <input type="number" id="count-${index}" class="quantity-input" value="0" min="0" oninput="handleInput(${index}, this.value)">
+                    <button class="btn-circle plus" onclick="updateCount(${index}, 1)">+</button>
+                </div>
+            `;
+        }
+        
         list.appendChild(card);
     });
     document.getElementById('ad-input').addEventListener('input', updateAdPreview);
     updateAdPreview();
     updateCartView(); // Wywołanie przy starcie dla pustego koszyka
+}
+
+// DYNAMICZNE DODAWANIE KOLEJNYCH PUSTYCH PÓL
+window.addCustomItemSlot = function() {
+    const index = inventory.length;
+    inventory.push({ name: "Własny przedmiot", min: 0, max: 0, category: "inne", isCustom: true });
+    counts[index] = 0;
+
+    const list = document.getElementById('items-list');
+    const card = document.createElement('div');
+    card.className = 'item-card custom-card-special';
+    card.setAttribute('data-category', 'inne');
+    card.setAttribute('data-name', 'własny przedmiot');
+    
+    card.innerHTML = `
+        <div class="item-info" style="width: 60%;">
+            <input type="text" id="custom-name-${index}" class="custom-item-name" placeholder="Produkt" oninput="updateCustomName(${index}, this.value)">
+            <input type="number" id="custom-price-${index}" class="custom-item-price" placeholder="Cena $" min="0" oninput="updateCustomPrice(${index}, this.value)">
+        </div>
+        <div class="controls">
+            <button class="btn-circle minus" onclick="updateCount(${index}, -1)">-</button>
+            <input type="number" id="count-${index}" class="quantity-input" value="0" min="0" oninput="handleInput(${index}, this.value)">
+            <button class="btn-circle plus" onclick="updateCount(${index}, 1)">+</button>
+        </div>
+    `;
+    
+    const customCards = document.querySelectorAll('.custom-card-special');
+    if (customCards.length > 0) {
+        const lastCustomCard = customCards[customCards.length - 1];
+        lastCustomCard.parentNode.insertBefore(card, lastCustomCard.nextSibling);
+    } else {
+        list.prepend(card);
+    }
+    
+    showNotice("Dodano nowe pole na własny przedmiot!", "success");
+    applyFilters(); 
+}
+
+// Funkcje do obsługi Custom Item
+window.updateCustomName = function(index, value) {
+    inventory[index].name = value || "Własny przedmiot";
+    // Zabezpieczenie przed błędem indeksów po dodaniu nowych pól:
+    const inputField = document.getElementById(`custom-name-${index}`);
+    if(inputField) {
+        const card = inputField.closest('.item-card');
+        if(card) card.setAttribute('data-name', inventory[index].name.toLowerCase());
+    }
+    updateCartView();
+}
+
+window.updateCustomPrice = function(index, value) {
+    let price = parseFloat(value) || 0;
+    inventory[index].min = price;
+    inventory[index].max = price;
+    calculateTotal();
 }
 
 function updateCount(index, change) {
@@ -247,6 +321,9 @@ async function generateQuote() {
 }
 
 function finalizeQuote(employeeName, finalPrice) {
+    // RESETUJEMY BLOKADĘ PODWÓJNEGO NALICZANIA DLA NOWEGO PARAGONU
+    isStatAddedForCurrentReceipt = false;
+    
     const receiptID = generateID();
     document.getElementById('current-receipt-date').innerText = getFormattedDate();
     document.getElementById('receipt-id-display').innerText = `NR: ${receiptID}`;
@@ -331,7 +408,10 @@ async function sendToDiscord() {
             const res = await fetch(DISCORD_WEBHOOK_URL, { method: "POST", body: formData });
             if (res.ok) {
                 // Dopisanie do statystyk następuje TYLKO TUTAJ
-                addDailyStat(currentEmployeeName, finalPriceNumeric);
+                if (!isStatAddedForCurrentReceipt) {
+                    addDailyStat(currentEmployeeName, finalPriceNumeric);
+                    isStatAddedForCurrentReceipt = true;
+                }
                 
                 showNotice("Wysłano na Discord i zaktualizowano obrót!", "success");
                 // Zamykamy okno po wysłaniu
@@ -420,6 +500,17 @@ document.getElementById('reset-btn').onclick = () => {
         counts[i] = 0;
         const inp = document.getElementById(`count-${i}`);
         if(inp) inp.value = 0;
+        
+        // Czyszczenie pol dla Wlasnego przedmiotu
+        if(inventory[i] && inventory[i].isCustom) {
+            inventory[i].name = "Własny przedmiot";
+            inventory[i].min = 0;
+            inventory[i].max = 0;
+            const nameInp = document.getElementById(`custom-name-${i}`);
+            const priceInp = document.getElementById(`custom-price-${i}`);
+            if(nameInp) nameInp.value = "";
+            if(priceInp) priceInp.value = "";
+        }
     });
     document.getElementById('final-price-input').value = "";
     calculateTotal();
