@@ -520,13 +520,16 @@ header p {
     border-color: var(--accent-color);
 }
 
-/* KOD DO UKRYCIA STRZAŁEK W POLU CENY */
+/* KOD DO UKRYCIA STRZAŁEK W POLU CENY I KWOTY TRANSAKCJI */
 .custom-item-price::-webkit-inner-spin-button,
-.custom-item-price::-webkit-outer-spin-button {
+.custom-item-price::-webkit-outer-spin-button,
+#final-price-input::-webkit-inner-spin-button,
+#final-price-input::-webkit-outer-spin-button {
     -webkit-appearance: none;
     margin: 0;
 }
-.custom-item-price {
+.custom-item-price,
+#final-price-input {
     -moz-appearance: textfield;
 }
 
@@ -882,57 +885,67 @@ header p {
     transform: rotate(-3deg);
 }
 
-/* Przyciski w modalu */
+/* Przyciski w modalu - LIFTING WIZUALNY */
 .modal-buttons {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 15px;
     width: 100%;
 }
 
+.discord-btn, .copy-btn, .close-btn {
+    width: 100%;
+    padding: 16px;
+    border-radius: 16px;
+    font-weight: 800;
+    font-size: 1.05rem;
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+    transition: var(--transition-normal);
+    letter-spacing: 0.5px;
+}
+
 .discord-btn {
-    background: #5865F2;
+    background: linear-gradient(135deg, #5865F2, #4752C4);
     color: white;
     border: none;
-    padding: 16px;
-    border-radius: 15px;
-    font-weight: 800;
-    cursor: pointer;
-    font-size: 1rem;
-    transition: var(--transition-normal);
+    box-shadow: 0 4px 15px rgba(88, 101, 242, 0.25);
 }
 
 .discord-btn:hover {
-    background: #4752C4;
-    transform: translateY(-2px);
+    transform: translateY(-3px);
+    box-shadow: 0 8px 25px rgba(88, 101, 242, 0.4);
+    filter: brightness(1.1);
 }
 
 .copy-btn {
-    background: #4b5563; 
+    background: linear-gradient(135deg, #334155, #1e293b);
     color: white;
-    border: none;
-    padding: 16px;
-    border-radius: 15px;
-    font-weight: 800;
-    cursor: pointer;
-    font-size: 1rem;
-    transition: var(--transition-normal);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
 }
 
 .copy-btn:hover {
-    background: #374151;
-    transform: translateY(-2px);
+    transform: translateY(-3px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
+    border-color: rgba(255, 255, 255, 0.1);
+    filter: brightness(1.2);
 }
 
 .close-btn {
-    background: var(--danger);
+    background: linear-gradient(135deg, #ef4444, #b91c1c);
     color: white;
     border: none;
-    padding: 14px;
-    border-radius: 15px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: var(--transition-normal);
+    box-shadow: 0 4px 15px rgba(239, 68, 68, 0.25);
+}
+
+.close-btn:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 25px rgba(239, 68, 68, 0.4);
+    filter: brightness(1.1);
 }
 
 /* ==========================================================================
