@@ -1,7 +1,10 @@
 const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1500573620605550725/VmpdLB3qN1FT6Jkf-U-Wo1cig-WEpVjleki4f-EA45G5QfSuBJeC3f1fqCKB_LTeXOQ5"; 
 
-// UWAGA: WKLEJ TUTAJ SWÓJ ADRES URL GOOGLE SHEETS
-const GOOGLE_SHEETS_URL = "https://script.google.com/macros/s/AKfycbycnbsg8yC8Cqk0tF-6syzBTvTLvO-MyTgx-zqAPjgBXPR132MicKNtjNoq3WMQfmLR/exec"; 
+// Baza PIN (stary arkusz):
+const PIN_API_URL = "https://script.google.com/macros/s/AKfycbycnbsg8yC8Cqk0tF-6syzBTvTLvO-MyTgx-zqAPjgBXPR132MicKNtjNoq3WMQfmLR/exec"; 
+
+// Baza Raportów (nowy arkusz - EL CARTEL - BAZA RAPORTÓW):
+const REPORTS_API_URL = "https://script.google.com/macros/s/AKfycbwcbHTDSA5H0LO2hWYmBleL0z74CXyLYzm188cvhnQBLdbmrOw0r5OMj7QyPXivMZfzeg/exec";
 
 const inventory = [
     { name: "Zdobiona książka", price: 150, category: "inne" },
@@ -169,7 +172,7 @@ window.generateQuote = async function() {
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Weryfikacja...';
 
     try {
-        const response = await fetch(`${GOOGLE_SHEETS_URL}?pin=${pin}`);
+        const response = await fetch(`${PIN_API_URL}?pin=${pin}`);
         const data = await response.json();
 
         if (data.isValid) {
@@ -242,6 +245,27 @@ async function sendToDiscord() {
     btn.disabled = true;
     btn.innerText = "PRZETWARZANIE...";
 
+    // --- ZBIERANIE DANYCH DO PANELU SZEFA ---
+    const itemsToLog = [];
+    inventory.forEach((item, i) => {
+        if (counts[i] > 0) {
+            itemsToLog.push({
+                name: item.name,
+                qty: counts[i],
+                total: item.price * counts[i]
+            });
+        }
+    });
+
+    const logPayload = {
+        action: "save_receipt",
+        type: "sprzedaz", 
+        date: getFormattedDate(),
+        employee: currentEmployeeName,
+        items: itemsToLog
+    };
+    // -----------------------------------------
+
     try {
         const canvas = await html2canvas(area, { 
             scale: 3, 
@@ -272,6 +296,12 @@ async function sendToDiscord() {
 
             const res = await fetch(DISCORD_WEBHOOK_URL, { method: "POST", body: formData });
             if (res.ok) {
+                // WYSYŁKA DO BAZY RAPORTÓW (W TLE)
+                fetch(REPORTS_API_URL, {
+                    method: "POST",
+                    body: JSON.stringify(logPayload)
+                }).catch(e => console.error("Błąd zapisu w arkuszu:", e));
+
                 showNotice("Wysłano na Discord!", "success");
                 closeModal();
             } else {

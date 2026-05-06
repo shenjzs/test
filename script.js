@@ -2,9 +2,13 @@
 // KONFIGURACJA
 // ==========================================
 const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1500540604827046078/_uzuOq6EK9Ip0XggKscXNsmPRZrl4EdmBSLcWcMRaavI0wimpqkxWIRn8TrELISJ6RZQ"; 
-const GOOGLE_SHEETS_URL = "https://script.google.com/macros/s/AKfycbycnbsg8yC8Cqk0tF-6syzBTvTLvO-MyTgx-zqAPjgBXPR132MicKNtjNoq3WMQfmLR/exec";
+// Baza PIN:
+const PIN_API_URL = "https://script.google.com/macros/s/AKfycbycnbsg8yC8Cqk0tF-6syzBTvTLvO-MyTgx-zqAPjgBXPR132MicKNtjNoq3WMQfmLR/exec";
+// Baza Raportów:
+const REPORTS_API_URL = "https://script.google.com/macros/s/AKfycbwcbHTDSA5H0LO2hWYmBleL0z74CXyLYzm188cvhnQBLdbmrOw0r5OMj7QyPXivMZfzeg/exec";
 
-const inventory = [
+// Główna, domyślna baza przedmiotów (bez pustych pól na start)
+const defaultInventory = [
     { name: "Zdobiona książka", min: 120, max: 120, category: "inne" },
     { name: "Dywan", min: 240, max: 240, category: "dom" },
     { name: "Komputer (laptop)", min: 570, max: 600, category: "elektronika" },
@@ -29,11 +33,12 @@ const inventory = [
     { name: "Telewizor", min: 570, max: 600, category: "elektronika" },
     { name: "Zegarek", min: 140, max: 160, category: "biżuteria" },
     { name: "Złota bransoletka", min: 200, max: 200, category: "biżuteria" },
-    { name: "Złota moneta", min: 50, max: 50, category: "inne" },
+    //{ name: "Złota moneta", min: 50, max: 50, category: "inne" },//
     { name: "Złote kolczyki", min: 200, max: 200, category: "biżuteria" },
     { name: "Popsuty telefon", min: 90, max: 95, category: "elektronika" }
 ];
 
+let inventory = [];
 let counts = {};
 let currentCategory = 'wszystkie';
 let currentMinTotal = 0; 
@@ -71,12 +76,37 @@ function addDailyStat(employeeName, amount) {
     localStorage.setItem(key, current + amount);
 }
 
-function init() {
-    const list = document.getElementById('items-list');
-    document.getElementById('header-date').innerText = getFormattedDate();
+// Funkcja resetująca cały koszyk i listę przedmiotów do stanu domyślnego
+function resetCartAndInventory() {
+    // 1. Odtwarzamy oryginalną bazę przedmiotów
+    inventory = JSON.parse(JSON.stringify(defaultInventory));
+    counts = {};
     
-    inventory.forEach((item, index) => {
+    // 2. Zerujemy liczniki
+    inventory.forEach((_, index) => {
         counts[index] = 0;
+    });
+
+    // 3. Czyścimy pole kwoty transakcji
+    const finalPriceInput = document.getElementById('final-price-input');
+    if (finalPriceInput) finalPriceInput.value = "";
+
+    // 4. Przebudowujemy interfejs
+    renderInventory();
+    calculateTotal();
+}
+
+function renderInventory() {
+    const list = document.getElementById('items-list');
+    list.innerHTML = ''; // Czyścimy starą listę
+    
+    // Sortujemy wizualnie: najpierw niestandardowe, potem zwykłe
+    const customCards = [];
+    const normalCards = [];
+
+    inventory.forEach((item, index) => {
+        if(counts[index] === undefined) counts[index] = 0;
+        
         const card = document.createElement('div');
         card.className = 'item-card';
         card.setAttribute('data-category', item.category);
@@ -86,15 +116,16 @@ function init() {
             card.classList.add('custom-card-special');
             card.innerHTML = `
                 <div class="item-info" style="width: 60%;">
-                    <input type="text" id="custom-name-${index}" class="custom-item-name" placeholder="Produkt" oninput="updateCustomName(${index}, this.value)">
-                    <input type="number" id="custom-price-${index}" class="custom-item-price" placeholder="Cena $" min="0" oninput="updateCustomPrice(${index}, this.value)">
+                    <input type="text" id="custom-name-${index}" class="custom-item-name" placeholder="Wpisz nazwę..." value="${item.name === 'Własny przedmiot' ? '' : item.name}" oninput="updateCustomName(${index}, this.value)">
+                    <input type="number" id="custom-price-${index}" class="custom-item-price" placeholder="Cena $" min="0" value="${item.min > 0 ? item.min : ''}" oninput="updateCustomPrice(${index}, this.value)">
                 </div>
                 <div class="controls">
                     <button class="btn-circle minus" onclick="updateCount(${index}, -1)">-</button>
-                    <input type="number" id="count-${index}" class="quantity-input" value="0" min="0" oninput="handleInput(${index}, this.value)">
+                    <input type="number" id="count-${index}" class="quantity-input" value="${counts[index]}" min="0" oninput="handleInput(${index}, this.value)">
                     <button class="btn-circle plus" onclick="updateCount(${index}, 1)">+</button>
                 </div>
             `;
+            customCards.push(card);
         } else {
             card.innerHTML = `
                 <div class="item-info">
@@ -103,17 +134,45 @@ function init() {
                 </div>
                 <div class="controls">
                     <button class="btn-circle minus" onclick="updateCount(${index}, -1)">-</button>
-                    <input type="number" id="count-${index}" class="quantity-input" value="0" min="0" oninput="handleInput(${index}, this.value)">
+                    <input type="number" id="count-${index}" class="quantity-input" value="${counts[index]}" min="0" oninput="handleInput(${index}, this.value)">
                     <button class="btn-circle plus" onclick="updateCount(${index}, 1)">+</button>
                 </div>
             `;
+            normalCards.push(card);
         }
-        
-        list.appendChild(card);
     });
+    
+    // Dodajemy najpierw własne pola, a potem resztę standardową
+    customCards.forEach(c => list.appendChild(c));
+    normalCards.forEach(c => list.appendChild(c));
+    
+    // Zastosuj aktualne filtry po przebudowie
+    applyFilters();
+}
+
+function init() {
+    document.getElementById('header-date').innerText = getFormattedDate();
+    
+    // Ładowanie domyślnego asortymentu
+    resetCartAndInventory();
+    
     document.getElementById('ad-input').addEventListener('input', updateAdPreview);
     updateAdPreview();
     updateCartView(); // Wywołanie przy starcie dla pustego koszyka
+}
+
+// LOGIKA PŁYWAJĄCEGO CENNIKA (STICKY NOTE)
+window.toggleWidget = function() {
+    const widget = document.getElementById('dynamic-price-widget');
+    const icon = document.getElementById('widget-toggle-icon');
+    if (widget && icon) {
+        widget.classList.toggle('collapsed');
+        if (widget.classList.contains('collapsed')) {
+            icon.classList.replace('fa-chevron-down', 'fa-chevron-up');
+        } else {
+            icon.classList.replace('fa-chevron-up', 'fa-chevron-down');
+        }
+    }
 }
 
 // DYNAMICZNE DODAWANIE KOLEJNYCH PUSTYCH PÓL
@@ -122,34 +181,8 @@ window.addCustomItemSlot = function() {
     inventory.push({ name: "Własny przedmiot", min: 0, max: 0, category: "inne", isCustom: true });
     counts[index] = 0;
 
-    const list = document.getElementById('items-list');
-    const card = document.createElement('div');
-    card.className = 'item-card custom-card-special';
-    card.setAttribute('data-category', 'inne');
-    card.setAttribute('data-name', 'własny przedmiot');
-    
-    card.innerHTML = `
-        <div class="item-info" style="width: 60%;">
-            <input type="text" id="custom-name-${index}" class="custom-item-name" placeholder="Produkt" oninput="updateCustomName(${index}, this.value)">
-            <input type="number" id="custom-price-${index}" class="custom-item-price" placeholder="Cena $" min="0" oninput="updateCustomPrice(${index}, this.value)">
-        </div>
-        <div class="controls">
-            <button class="btn-circle minus" onclick="updateCount(${index}, -1)">-</button>
-            <input type="number" id="count-${index}" class="quantity-input" value="0" min="0" oninput="handleInput(${index}, this.value)">
-            <button class="btn-circle plus" onclick="updateCount(${index}, 1)">+</button>
-        </div>
-    `;
-    
-    const customCards = document.querySelectorAll('.custom-card-special');
-    if (customCards.length > 0) {
-        const lastCustomCard = customCards[customCards.length - 1];
-        lastCustomCard.parentNode.insertBefore(card, lastCustomCard.nextSibling);
-    } else {
-        list.prepend(card);
-    }
-    
+    renderInventory();
     showNotice("Dodano nowe pole na własny przedmiot!", "success");
-    applyFilters(); 
 }
 
 // Funkcje do obsługi Custom Item
@@ -171,13 +204,14 @@ window.updateCustomPrice = function(index, value) {
     calculateTotal();
 }
 
-function updateCount(index, change) {
+window.updateCount = function(index, change) {
     counts[index] = Math.max(0, (counts[index] || 0) + change);
-    document.getElementById(`count-${index}`).value = counts[index];
+    const countInput = document.getElementById(`count-${index}`);
+    if (countInput) countInput.value = counts[index];
     calculateTotal();
 }
 
-function handleInput(index, value) {
+window.handleInput = function(index, value) {
     counts[index] = Math.max(0, parseInt(value) || 0);
     calculateTotal();
 }
@@ -244,10 +278,10 @@ function updateCartView() {
     if (sidebarTotal) sidebarTotal.innerText = currentMinTotal + '$' + (currentMaxTotal > currentMinTotal ? ` - ${currentMaxTotal}$` : '');
 }
 
-function filterCategory(cat, btn) {
+window.filterCategory = function(cat, btn) {
     currentCategory = cat;
     document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
+    if(btn) btn.classList.add('active');
     applyFilters();
 }
 
@@ -257,21 +291,21 @@ function applyFilters() {
     const itemsList = document.getElementById('items-list');
 
     if (currentCategory === 'reklama') {
-        adSection.classList.remove('hidden');
-        itemsList.classList.add('hidden');
+        if(adSection) adSection.classList.remove('hidden');
+        if(itemsList) itemsList.classList.add('hidden');
     } else {
-        adSection.classList.add('hidden');
-        itemsList.classList.remove('hidden');
+        if(adSection) adSection.classList.add('hidden');
+        if(itemsList) itemsList.classList.remove('hidden');
         document.querySelectorAll('.item-card').forEach(card => {
-            const name = card.getAttribute('data-name');
-            const cat = card.getAttribute('data-category');
+            const name = card.getAttribute('data-name') || '';
+            const cat = card.getAttribute('data-category') || '';
             const match = name.includes(term) && (currentCategory === 'wszystkie' || cat === currentCategory);
             card.classList.toggle('hidden', !match);
         });
     }
 }
 
-async function generateQuote() {
+window.generateQuote = async function() {
     const hasItems = Object.values(counts).some(c => c > 0);
     const finalPriceInput = document.getElementById('final-price-input');
     const finalPrice = parseFloat(finalPriceInput.value);
@@ -300,7 +334,8 @@ async function generateQuote() {
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Weryfikacja...';
 
     try {
-        const response = await fetch(`${GOOGLE_SHEETS_URL}?pin=${pin}`);
+        // SPRAWDZANIE PINU W STARYM ARKUSZU
+        const response = await fetch(`${PIN_API_URL}?pin=${pin}`);
         const data = await response.json();
 
         if (data.isValid) {
@@ -382,6 +417,27 @@ async function sendToDiscord() {
     btn.disabled = true;
     btn.innerText = "Wysyłanie...";
 
+    // --- ZBIERANIE DANYCH DO PANELU SZEFA ---
+    const itemsToLog = [];
+    inventory.forEach((item, i) => {
+        if (counts[i] > 0) {
+            itemsToLog.push({
+                name: item.name,
+                qty: counts[i],
+                total: item.min * counts[i]
+            });
+        }
+    });
+
+    const logPayload = {
+        action: "save_receipt",
+        type: "skup",
+        date: getFormattedDate(),
+        employee: currentEmployeeName,
+        items: itemsToLog
+    };
+    // -----------------------------------------
+
     try {
         const canvas = await html2canvas(area, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
         canvas.toBlob(async (blob) => {
@@ -407,6 +463,12 @@ async function sendToDiscord() {
             
             const res = await fetch(DISCORD_WEBHOOK_URL, { method: "POST", body: formData });
             if (res.ok) {
+                // WYSYŁAMY PACZKĘ DANYCH DO NOWEGO ARKUSZA SZEFA (w tle)
+                fetch(REPORTS_API_URL, {
+                    method: "POST",
+                    body: JSON.stringify(logPayload)
+                }).catch(e => console.error("Błąd zapisu w arkuszu:", e));
+
                 // Dopisanie do statystyk następuje TYLKO TUTAJ
                 if (!isStatAddedForCurrentReceipt) {
                     addDailyStat(currentEmployeeName, finalPriceNumeric);
@@ -414,6 +476,10 @@ async function sendToDiscord() {
                 }
                 
                 showNotice("Wysłano na Discord i zaktualizowano obrót!", "success");
+                
+                // AUTOMATYCZNE CZYSZCZENIE KOSZYKA PO WYSŁANIU
+                resetCartAndInventory();
+                
                 // Zamykamy okno po wysłaniu
                 closeModal();
             } else throw new Error();
@@ -426,7 +492,7 @@ async function sendToDiscord() {
     }
 }
 
-async function copyReceiptToClipboard() {
+window.copyReceiptToClipboard = async function() {
     const btn = document.getElementById('copy-receipt-btn');
     const area = document.getElementById('receipt-capture-area');
     
@@ -459,35 +525,39 @@ async function copyReceiptToClipboard() {
     }
 }
 
-function updateAdPreview() {
-    const input = document.getElementById('ad-input').value;
+window.updateAdPreview = function() {
+    const input = document.getElementById('ad-input');
+    if(!input) return;
+    
     const preview = document.getElementById('ad-preview');
     const colors = {'~r~':'#ff4444','~g~':'#33ff33','~b~':'#3399ff','~y~':'#ffff33','~p~':'#cc66ff','~o~':'#ff9933','~w~':'#fff','~s~':'#fff'};
     let html = "", style = "color:#fff", bold = false;
     
-    input.split(/(~[a-z]~)/g).forEach(p => {
+    input.value.split(/(~[a-z]~)/g).forEach(p => {
         if (p === '~h~') bold = !bold;
         else if (colors[p]) style = `color:${colors[p]}`;
         else html += `<span style="${style};font-weight:${bold?900:400}">${p}</span>`;
     });
-    preview.innerHTML = html;
+    if(preview) preview.innerHTML = html;
 }
 
-function insertTag(tag) {
+window.insertTag = function(tag) {
     const area = document.getElementById('ad-input');
     const s = area.selectionStart, e = area.selectionEnd;
     area.value = area.value.substring(0, s) + tag + area.value.substring(e);
     updateAdPreview();
 }
 
-function copyAd() {
+window.copyAd = function() {
     navigator.clipboard.writeText(document.getElementById('ad-input').value);
     showNotice("Skopiowano reklamę!", "success");
 }
 
-function closeModal() { document.getElementById('quote-modal').classList.remove('active'); }
+window.closeModal = function() { 
+    document.getElementById('quote-modal').classList.remove('active'); 
+}
 
-function showNotice(msg, type) {
+window.showNotice = function(msg, type) {
     const t = document.createElement('div');
     t.className = `toast ${type}`;
     t.innerText = msg;
@@ -495,37 +565,32 @@ function showNotice(msg, type) {
     setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 500); }, 3000);
 }
 
+// PRZYCISK KOSZA (RESET RĘCZNY)
 document.getElementById('reset-btn').onclick = () => {
-    Object.keys(counts).forEach(i => {
-        counts[i] = 0;
-        const inp = document.getElementById(`count-${i}`);
-        if(inp) inp.value = 0;
-        
-        // Czyszczenie pol dla Wlasnego przedmiotu
-        if(inventory[i] && inventory[i].isCustom) {
-            inventory[i].name = "Własny przedmiot";
-            inventory[i].min = 0;
-            inventory[i].max = 0;
-            const nameInp = document.getElementById(`custom-name-${i}`);
-            const priceInp = document.getElementById(`custom-price-${i}`);
-            if(nameInp) nameInp.value = "";
-            if(priceInp) priceInp.value = "";
-        }
-    });
-    document.getElementById('final-price-input').value = "";
-    calculateTotal();
+    resetCartAndInventory();
     showNotice("Wyczyszczono koszyk!", "warning");
 };
 
-document.getElementById('send-discord-btn').onclick = sendToDiscord;
-document.getElementById('copy-receipt-btn').onclick = copyReceiptToClipboard;
-document.getElementById('search-input').addEventListener('input', applyFilters);
+// Podpięcie zdarzeń przy starcie
+document.addEventListener('DOMContentLoaded', () => {
+    init();
+    
+    const sendBtn = document.getElementById('send-discord-btn');
+    if(sendBtn) sendBtn.onclick = sendToDiscord;
+    
+    const searchInput = document.getElementById('search-input');
+    if(searchInput) searchInput.addEventListener('input', applyFilters);
 
-const triggerGenerateQuote = function(e) {
-    if (e.key === 'Enter') generateQuote();
-};
-document.getElementById('employee-pin-input').addEventListener('keypress', triggerGenerateQuote);
-document.getElementById('final-price-input').addEventListener('keypress', triggerGenerateQuote);
+    const triggerGenerateQuote = function(e) {
+        if (e.key === 'Enter') generateQuote();
+    };
+    
+    const pinInput = document.getElementById('employee-pin-input');
+    if(pinInput) pinInput.addEventListener('keypress', triggerGenerateQuote);
+    
+    const finalPriceInput = document.getElementById('final-price-input');
+    if(finalPriceInput) finalPriceInput.addEventListener('keypress', triggerGenerateQuote);
+});
 
 // FUNKCJA ZWIJANIA PASKA NA MOBILE
 window.toggleSummary = function() {
@@ -542,5 +607,3 @@ window.toggleSummary = function() {
         }
     }
 }
-
-init();
