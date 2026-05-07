@@ -64,6 +64,13 @@ body {
     filter: drop-shadow(0 0 8px rgba(243, 156, 18, 0.5));
 }
 
+/* DODANA KLASA ABY PRZYCISKI BYŁY OBOK SIEBIE */
+.nav-links {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
 .nav-link-btn {
     color: var(--text-primary);
     text-decoration: none;

@@ -240,7 +240,7 @@ window.finalizeQuote = function(employeeName) {
                 <h2>EL CARTEL EXPORT</h2>
                 <p class="receipt-meta">Raport sprzedaży przedmiotów</p>
                 <p class="receipt-meta">NR: ${lastGeneratedReportID}</p>
-                <p class="receipt-meta">KIEROWCA: ${employeeName.toUpperCase()}</p>
+                <p class="receipt-meta">PRACOWNIK: ${employeeName.toUpperCase()}</p>
             </div>
             <div class="receipt-divider"></div>
             <div class="receipt-items-list">
@@ -345,6 +345,16 @@ async function sendToDiscord() {
 
                 showNotice("Wysłano na Discord!", "success");
                 closeModal();
+                
+                // AUTOMATYCZNE CZYSZCZENIE KOSZYKA PO WYSŁANIU
+                Object.keys(counts).forEach(i => {
+                    counts[i] = 0;
+                    const inp = document.getElementById(`count-${i}`);
+                    if (inp) inp.value = 0;
+                });
+                document.querySelectorAll('.custom-item').forEach(el => el.remove());
+                calculateTotal();
+
             } else {
                 showNotice("Błąd Webhooka!", "danger");
             }
