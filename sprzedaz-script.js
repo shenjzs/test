@@ -38,7 +38,7 @@ let counts = {};
 let currentCategory = 'wszystkie';
 let currentTotal = 0;
 let lastGeneratedReportID = ""; 
-let currentEmployeeName = ""; // Globalna zmienna przechowująca imię po autoryzacji
+let currentEmployeeName = ""; 
 
 function getFormattedDate() {
     const now = new Date();
@@ -60,7 +60,7 @@ function init() {
         card.innerHTML = `
             <div class="item-info">
                 <span class="item-name">${item.name}</span>
-                <span class="item-price">Skup: ${item.price}$</span>
+                <span class="item-price">Eksport: ${item.price}$</span>
             </div>
             <div class="controls">
                 <button class="btn-circle minus" onclick="updateCount(${index}, -1)">-</button>
@@ -71,8 +71,46 @@ function init() {
         list.appendChild(card);
     });
     
-    // Inicjalizacja pustego koszyka przy starcie
     updateCartView();
+}
+
+// LOGIKA WŁASNEGO PRZEDMIOTU (ZGODNIE ZE SCREENAMI)
+window.addCustomItemSlot = function() {
+    const list = document.getElementById('items-list');
+    const index = inventory.length; 
+    
+    inventory.push({ name: "", price: 0, category: "custom", isCustom: true });
+    counts[index] = 1;
+
+    const card = document.createElement('div');
+    card.className = 'item-card custom-item';
+    card.setAttribute('data-category', 'custom');
+    card.id = `custom-card-${index}`;
+    
+    card.innerHTML = `
+        <div class="custom-inputs-wrapper">
+            <input type="text" class="custom-name-input" placeholder="Wpisz nazwę..." oninput="updateCustomName(${index}, this.value)">
+            <input type="number" class="custom-price-input" placeholder="Cena $" min="0" oninput="updateCustomPrice(${index}, this.value)">
+        </div>
+        <div class="controls">
+            <button class="btn-circle minus" onclick="updateCount(${index}, -1)">-</button>
+            <input type="number" id="count-${index}" class="quantity-input" value="1" min="0" oninput="handleInput(${index}, this.value)">
+            <button class="btn-circle plus" onclick="updateCount(${index}, 1)">+</button>
+        </div>
+    `;
+    
+    list.insertBefore(card, list.firstChild);
+    calculateTotal();
+}
+
+window.updateCustomName = function(i, val) {
+    inventory[i].name = val || "Własny przedmiot";
+    updateCartView();
+}
+
+window.updateCustomPrice = function(i, val) {
+    inventory[i].price = parseInt(val) || 0;
+    calculateTotal();
 }
 
 window.updateCount = function(i, change) {
@@ -92,7 +130,6 @@ function calculateTotal() {
     const totalDisplay = document.getElementById('total-price');
     if (totalDisplay) totalDisplay.innerText = currentTotal + '$';
     
-    // Aktualizujemy koszyk przy każdej zmianie sumy
     updateCartView();
 }
 
@@ -115,11 +152,12 @@ window.updateCartView = function() {
         if (counts[index] > 0) {
             totalItems += counts[index];
             let itemTotal = item.price * counts[index];
+            let displayName = item.isCustom ? (item.name || "Własny przedmiot") : item.name;
             
             html += `
                 <div class="cart-item">
                     <div class="cart-item-info-col">
-                        <span class="cart-item-name">${item.name}</span>
+                        <span class="cart-item-name">${displayName}</span>
                         <div class="cart-controls">
                             <button class="cart-btn-circle minus" onclick="updateCount(${index}, -1)">-</button>
                             <span class="cart-item-qty">${counts[index]}</span>
@@ -150,7 +188,7 @@ window.filterCategory = function(cat, btn) {
 
 function applyFilters() {
     const term = document.getElementById('search-input').value.toLowerCase();
-    document.querySelectorAll('.item-card').forEach(card => {
+    document.querySelectorAll('.item-card:not(.custom-item)').forEach(card => {
         const match = card.getAttribute('data-name').includes(term) && 
                       (currentCategory === 'wszystkie' || card.getAttribute('data-category') === currentCategory);
         card.classList.toggle('hidden', !match);
@@ -179,9 +217,6 @@ window.generateQuote = async function() {
             currentEmployeeName = data.name;
             showNotice(`Zalogowano jako: ${currentEmployeeName}`, "success");
             
-            // Usunięto czyszczenie pola PIN, kod zostaje w polu na kolejne transakcje
-            
-            // Generujemy paragon
             finalizeQuote(currentEmployeeName);
         } else {
             showNotice("Nieprawidłowy PIN!", "danger");
@@ -209,12 +244,18 @@ window.finalizeQuote = function(employeeName) {
             </div>
             <div class="receipt-divider"></div>
             <div class="receipt-items-list">
-                ${inventory.map((item, i) => counts[i] > 0 ? `
-                    <div class="receipt-row">
-                        <span>${item.name} x${counts[i]}</span>
-                        <span>${item.price * counts[i]}$</span>
-                    </div>
-                ` : '').join('')}
+                ${inventory.map((item, i) => {
+                    if (counts[i] > 0) {
+                        let dName = item.isCustom ? (item.name || "Własny przedmiot") : item.name;
+                        return `
+                        <div class="receipt-row">
+                            <span>${dName} x${counts[i]}</span>
+                            <span>${item.price * counts[i]}$</span>
+                        </div>
+                        `;
+                    }
+                    return '';
+                }).join('')}
             </div>
             <div class="receipt-divider"></div>
             <div class="receipt-row total">
@@ -249,8 +290,9 @@ async function sendToDiscord() {
     const itemsToLog = [];
     inventory.forEach((item, i) => {
         if (counts[i] > 0) {
+            let dName = item.isCustom ? (item.name || "Własny przedmiot") : item.name;
             itemsToLog.push({
-                name: item.name,
+                name: dName,
                 qty: counts[i],
                 total: item.price * counts[i]
             });
@@ -264,7 +306,6 @@ async function sendToDiscord() {
         employee: currentEmployeeName,
         items: itemsToLog
     };
-    // -----------------------------------------
 
     try {
         const canvas = await html2canvas(area, { 
@@ -359,6 +400,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const inp = document.getElementById(`count-${i}`);
                 if (inp) inp.value = 0;
             });
+            // Usunięcie wszystkich niestandardowych kart
+            document.querySelectorAll('.custom-item').forEach(el => el.remove());
             calculateTotal();
             showNotice("Wyczyszczono listę!", "warning");
         };

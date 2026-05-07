@@ -193,6 +193,94 @@ header h1 {
     box-shadow: 0 4px 15px rgba(243, 156, 18, 0.3);
 }
 
+/* ==========================================================================
+   STYLE DLA ASORTYMENTU I NIESTANDARDOWEGO PRZEDMIOTU
+   ========================================================================== */
+.asortyment-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.asortyment-title {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.custom-product-btn {
+    background: transparent;
+    border: 1px dashed var(--accent-color);
+    color: var(--accent-color);
+    padding: 10px 20px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-weight: 700;
+    transition: var(--transition-normal);
+    text-transform: uppercase;
+    font-size: 0.85rem;
+}
+
+.custom-product-btn:hover {
+    background: rgba(243, 156, 18, 0.1);
+    box-shadow: 0 4px 15px rgba(243, 156, 18, 0.2);
+}
+
+.item-card.custom-item {
+    border: 1px dashed var(--accent-color);
+    background: rgba(243, 156, 18, 0.03);
+}
+
+.custom-inputs-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex: 1;
+    margin-right: 15px;
+}
+
+.custom-name-input {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-color);
+    color: white;
+    padding: 10px 15px;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    outline: none;
+    transition: var(--transition-normal);
+    width: 100%;
+    max-width: 180px;
+}
+
+.custom-price-input {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-color);
+    color: white;
+    padding: 10px 15px;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    outline: none;
+    transition: var(--transition-normal);
+    width: 90px;
+}
+
+/* WYŁĄCZENIE STRZAŁEK W POLU CENY */
+.custom-price-input::-webkit-inner-spin-button,
+.custom-price-input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+.custom-price-input {
+    -moz-appearance: textfield;
+}
+
+.custom-name-input:focus, .custom-price-input:focus {
+    border-color: var(--accent-color);
+}
+
 /* LISTA PRZEDMIOTÓW */
 .items-grid {
     display: grid;
@@ -272,7 +360,7 @@ header h1 {
     font-weight: 800;
 }
 
-/* Ukrycie strzałek w polu ilości */
+/* Ukrycie strzałek w polu ilości (domyślnym) */
 .quantity-input::-webkit-inner-spin-button,
 .quantity-input::-webkit-outer-spin-button {
     -webkit-appearance: none;
@@ -605,16 +693,11 @@ header h1 {
 .cart-total-row { display: flex; justify-content: space-between; align-items: center; font-size: 1.1rem; font-weight: 800; color: var(--text-primary); }
 .cart-total-row span:last-child { color: var(--accent-color); }
 
-
 /* RESPONSYWNOŚĆ I ZWIJANIE PASKA */
-.summary-toggle {
-    display: none; /* Ukryte na komputerze */
-}
+.summary-toggle { display: none; }
 
 @media (max-width: 768px) {
-    body {
-        padding-bottom: 250px; /* Zwiększony margines na dole na mobile */
-    }
+    body { padding-bottom: 250px; }
 
     .summary-bar {
         flex-direction: column;
@@ -625,14 +708,12 @@ header h1 {
         right: 0;
         width: 100%;
         max-width: none;
-        transform: translateX(0) translateY(calc(100% - 60px)); /* Chowa cały pasek oprócz guzika */
+        transform: translateX(0) translateY(calc(100% - 60px));
         transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         border-radius: 30px 30px 0 0;
     }
 
-    .summary-bar.open {
-        transform: translateX(0) translateY(0); /* Wysunięty po kliknięciu */
-    }
+    .summary-bar.open { transform: translateX(0) translateY(0); }
 
     .summary-toggle {
         display: flex;
@@ -653,41 +734,14 @@ header h1 {
         z-index: 101;
     }
 
-    .actions {
-        flex-direction: column;
-        width: 100%;
-        gap: 15px;
-    }
-    
-    .cart-toggle-btn {
-        width: 100%;
-        justify-content: center;
-    }
-
-    .input-wrapper, .button-group {
-        width: 100%;
-    }
-
-    .custom-input {
-        width: 100%;
-    }
-
-    .quote-button {
-        flex: 1;
-        width: 100%;
-    }
-
-    header h1 {
-        font-size: 2.2rem;
-    }
-
-    .items-grid {
-        grid-template-columns: 1fr;
-    }
-    
-    .cart-sidebar {
-        width: 100%;
-    }
+    .actions { flex-direction: column; width: 100%; gap: 15px; }
+    .cart-toggle-btn { width: 100%; justify-content: center; }
+    .input-wrapper, .button-group { width: 100%; }
+    .custom-input { width: 100%; }
+    .quote-button { flex: 1; width: 100%; }
+    header h1 { font-size: 2.2rem; }
+    .items-grid { grid-template-columns: 1fr; }
+    .cart-sidebar { width: 100%; }
 }
 
 /* DODANE DLA SYSTEMU PIN */
