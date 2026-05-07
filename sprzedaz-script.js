@@ -60,7 +60,7 @@ function init() {
         card.innerHTML = `
             <div class="item-info">
                 <span class="item-name">${item.name}</span>
-                <span class="item-price">Eksport: ${item.price}$</span>
+                <span class="item-price">Skup: ${item.price}$</span>
             </div>
             <div class="controls">
                 <button class="btn-circle minus" onclick="updateCount(${index}, -1)">-</button>
