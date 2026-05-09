@@ -649,9 +649,8 @@ window.toggleSummary = function() {
 // ==========================================
 // SYSTEM AUTOMATYCZNEJ AKTUALIZACJI STRONY
 // ==========================================
-const APP_VERSION = "1.3.2"; // Zmień tę wartość przy każdej aktualizacji (musi być inna niż w version.json na serwerze, aby wywołać odświeżenie)
+const APP_VERSION = "1.3.2"; // WERSJA APLIKACJI
 
-// Wstrzykiwanie stylów dla powiadomienia (żeby nie ruszać plików CSS)
 const updateStyle = document.createElement('style');
 updateStyle.innerHTML = `
 .update-notify {
@@ -683,9 +682,7 @@ async function checkUpdates() {
         if (data.version && data.version !== APP_VERSION) {
             showUpdatePrompt();
         }
-    } catch (e) {
-        // Ciche ignorowanie błędu, np. gdy plik jeszcze nie istnieje na serwerze
-    }
+    } catch (e) { }
 }
 
 function showUpdatePrompt() {
@@ -700,13 +697,25 @@ function showUpdatePrompt() {
     document.body.appendChild(div);
 }
 
-window.forceHardReload = function() {
+window.forceHardReload = async function() {
+    // 1. Ubicie Service Workerów (jeśli jakieś są i blokują odświeżanie)
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.getRegistrations().then(registrations => {
-            for (let registration of registrations) { registration.unregister(); }
-        });
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (let reg of registrations) {
+            await reg.unregister();
+        }
     }
-    window.location.reload(true); 
+    
+    // 2. Twarde czyszczenie pamięci podręcznej przeglądarki (Cache Storage API)
+    if ('caches' in window) {
+        const cacheNames = await caches.keys();
+        for (let name of cacheNames) {
+            await caches.delete(name);
+        }
+    }
+    
+    // 3. Wymuszenie pobrania świeżych plików poprzez dodanie unikalnego znacznika czasu do linku
+    window.location.href = window.location.pathname + '?refresh=' + new Date().getTime();
 };
 
 setInterval(checkUpdates, 60000);
