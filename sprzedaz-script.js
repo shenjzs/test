@@ -31,7 +31,8 @@ const inventory = [
     { name: "Głośnik", price: 180, category: "elektronika" },
     { name: "Telewizor", price: 750, category: "elektronika" },
     { name: "Zegarek", price: 200, category: "biżuteria" },
-    { name: "Stary popsuty telefon", price: 110, category: "elektronika" }
+    { name: "Stary popsuty telefon", price: 110, category: "elektronika" },
+	{ name: "Złota moneta z prezydentem", price: 250, category: "inne" }
 ];
 
 let counts = {};
@@ -43,6 +44,18 @@ let currentEmployeeName = "";
 function getFormattedDate() {
     const now = new Date();
     return `${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')}.${now.getFullYear()}`;
+}
+
+// NOWA FUNKCJA Z GODZINĄ
+function getFormattedDateTime() {
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, '0');
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const year = now.getFullYear();
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    return `${day}.${month}.${year} ${hours}:${minutes}:${seconds}`;
 }
 
 function init() {
@@ -302,8 +315,9 @@ async function sendToDiscord() {
     const logPayload = {
         action: "save_receipt",
         type: "sprzedaz", 
-        date: getFormattedDate(),
+        date: getFormattedDateTime(),
         employee: currentEmployeeName,
+        report_id: lastGeneratedReportID, // <--- DODANO NUMER RAPORTU DO BAZY!
         items: itemsToLog
     };
 

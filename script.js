@@ -33,7 +33,7 @@ const defaultInventory = [
     { name: "Telewizor", min: 570, max: 600, category: "elektronika" },
     { name: "Zegarek", min: 140, max: 160, category: "biżuteria" },
     { name: "Złota bransoletka", min: 200, max: 200, category: "biżuteria" },
-    //{ name: "Złota moneta", min: 50, max: 50, category: "inne" },//
+    { name: "Złota moneta z prezydentem", min: 100, max: 100, category: "inne" },
     { name: "Złote kolczyki", min: 200, max: 200, category: "biżuteria" },
     { name: "Popsuty telefon", min: 90, max: 95, category: "elektronika" }
 ];
@@ -53,6 +53,18 @@ function getFormattedDate() {
     const month = String(now.getMonth() + 1).padStart(2, '0');
     const year = now.getFullYear();
     return `${day}.${month}.${year}`;
+}
+
+// NOWA FUNKCJA Z GODZINĄ
+function getFormattedDateTime() {
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, '0');
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const year = now.getFullYear();
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    return `${day}.${month}.${year} ${hours}:${minutes}:${seconds}`;
 }
 
 function generateID() {
@@ -367,11 +379,17 @@ function finalizeQuote(employeeName, finalPrice) {
 
     const itemsDiv = document.getElementById('receipt-items');
     itemsDiv.innerHTML = '';
+    
+    // Ustalanie wskaźnika proporcji, by rozbić ręczną kwotę finalPrice
+    const ratio = finalPrice / currentMinTotal;
+
     inventory.forEach((item, i) => {
         if (counts[i] > 0) {
             const row = document.createElement('div');
             row.className = 'receipt-row';
-            row.innerHTML = `<span>${item.name} x${counts[i]}</span><span>${item.min * counts[i]}$</span>`;
+            // Cena na paragonie też jest proporcjonalnie rozbita z ręcznej kwoty
+            const calculatedItemTotal = Math.round(item.min * counts[i] * ratio);
+            row.innerHTML = `<span>${item.name} [x${counts[i]}]</span><span>${calculatedItemTotal}$</span>`;
             itemsDiv.appendChild(row);
         }
     });
@@ -419,21 +437,41 @@ async function sendToDiscord() {
 
     // --- ZBIERANIE DANYCH DO PANELU SZEFA ---
     const itemsToLog = [];
-    inventory.forEach((item, i) => {
-        if (counts[i] > 0) {
-            itemsToLog.push({
-                name: item.name,
-                qty: counts[i],
-                total: item.min * counts[i]
-            });
+    
+    // Kluczowa zmiana: Rozbijamy finalPrice proporcjonalnie na przedmioty
+    // Oraz radzimy sobie z "resztówką", gdyby proporcja dała po przecinku
+    let remainingAmount = finalPriceNumeric;
+    const ratio = finalPriceNumeric / currentMinTotal;
+    
+    // Odfiltrowanie tylko tych elementów, które zostały dodane do koszyka
+    const activeItems = inventory.map((item, index) => ({ item, index })).filter(x => counts[x.index] > 0);
+
+    activeItems.forEach((x, arrayIndex) => {
+        const item = x.item;
+        const count = counts[x.index];
+        let calculatedTotal;
+        
+        // Zabezpieczenie przed ułamkami: Ostatni produkt w koszyku bierze całą resztę (tzw. wyrównanie ułamków)
+        if (arrayIndex === activeItems.length - 1) {
+            calculatedTotal = remainingAmount;
+        } else {
+            calculatedTotal = Math.round(item.min * count * ratio);
+            remainingAmount -= calculatedTotal;
         }
+
+        itemsToLog.push({
+            name: item.name,
+            qty: count,
+            total: calculatedTotal
+        });
     });
 
     const logPayload = {
         action: "save_receipt",
         type: "skup",
-        date: getFormattedDate(),
+        date: getFormattedDateTime(),
         employee: currentEmployeeName,
+        report_id: receiptID, // <--- DODANO NUMER PARAGONU DO BAZY!
         items: itemsToLog
     };
     // -----------------------------------------
@@ -607,3 +645,69 @@ window.toggleSummary = function() {
         }
     }
 }
+
+// ==========================================
+// SYSTEM AUTOMATYCZNEJ AKTUALIZACJI STRONY
+// ==========================================
+const APP_VERSION = "1.0.0"; // Zmień tę wartość przy każdej aktualizacji (musi być inna niż w version.json na serwerze, aby wywołać odświeżenie)
+
+// Wstrzykiwanie stylów dla powiadomienia (żeby nie ruszać plików CSS)
+const updateStyle = document.createElement('style');
+updateStyle.innerHTML = `
+.update-notify {
+    position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--accent-color, #38bdf8); color: #000;
+    padding: 15px 30px; border-radius: 50px; z-index: 10000;
+    font-weight: 900; display: flex; align-items: center; gap: 15px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.8), 0 0 20px var(--accent-color, #38bdf8);
+    animation: slideDownUpdate 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    border: 2px solid white;
+}
+@keyframes slideDownUpdate {
+    from { top: -100px; opacity: 0; }
+    to { top: 20px; opacity: 1; }
+}
+.update-btn-refresh {
+    background: white; color: var(--accent-color, #38bdf8);
+    border: none; padding: 8px 20px; border-radius: 20px;
+    cursor: pointer; font-weight: 900; text-transform: uppercase; transition: 0.2s;
+}
+.update-btn-refresh:hover { transform: scale(1.1); background: #f1f5f9; }
+`;
+document.head.appendChild(updateStyle);
+
+async function checkUpdates() {
+    try {
+        const response = await fetch(`version.json?t=${new Date().getTime()}`);
+        const data = await response.json();
+        if (data.version && data.version !== APP_VERSION) {
+            showUpdatePrompt();
+        }
+    } catch (e) {
+        // Ciche ignorowanie błędu, np. gdy plik jeszcze nie istnieje na serwerze
+    }
+}
+
+function showUpdatePrompt() {
+    if (document.getElementById('update-prompt')) return;
+    const div = document.createElement('div');
+    div.id = 'update-prompt';
+    div.className = 'update-notify';
+    div.innerHTML = `
+        <span><i class="fas fa-sync-alt fa-spin"></i> Wgrano nową wersję systemu!</span>
+        <button class="update-btn-refresh" onclick="forceHardReload()">Odśwież teraz</button>
+    `;
+    document.body.appendChild(div);
+}
+
+window.forceHardReload = function() {
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(registrations => {
+            for (let registration of registrations) { registration.unregister(); }
+        });
+    }
+    window.location.reload(true); 
+};
+
+setInterval(checkUpdates, 60000);
+setTimeout(checkUpdates, 5000);
