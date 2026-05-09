@@ -649,7 +649,7 @@ window.toggleSummary = function() {
 // ==========================================
 // SYSTEM AUTOMATYCZNEJ AKTUALIZACJI STRONY
 // ==========================================
-const APP_VERSION = "1.0.0"; // Zmień tę wartość przy każdej aktualizacji (musi być inna niż w version.json na serwerze, aby wywołać odświeżenie)
+const APP_VERSION = "1.3.2"; // Zmień tę wartość przy każdej aktualizacji (musi być inna niż w version.json na serwerze, aby wywołać odświeżenie)
 
 // Wstrzykiwanie stylów dla powiadomienia (żeby nie ruszać plików CSS)
 const updateStyle = document.createElement('style');
