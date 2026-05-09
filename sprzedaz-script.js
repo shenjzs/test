@@ -445,7 +445,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ==========================================
 // SYSTEM AUTOMATYCZNEJ AKTUALIZACJI STRONY
 // ==========================================
-const APP_VERSION = "1.3.2"; // WERSJA APLIKACJI
+const APP_VERSION = "1.3.3"; // WERSJA APLIKACJI
 
 const updateStyle = document.createElement('style');
 updateStyle.innerHTML = `
