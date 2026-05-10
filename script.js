@@ -1,4 +1,9 @@
 // ==========================================
+// WERSJA APLIKACJI (Zmień, aby wymusić odświeżenie u wszystkich)
+// ==========================================
+const APP_VERSION = "1.3.2";
+
+// ==========================================
 // KONFIGURACJA
 // ==========================================
 const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1500540604827046078/_uzuOq6EK9Ip0XggKscXNsmPRZrl4EdmBSLcWcMRaavI0wimpqkxWIRn8TrELISJ6RZQ"; 
@@ -649,40 +654,18 @@ window.toggleSummary = function() {
 // ==========================================
 // SYSTEM AUTOMATYCZNEJ AKTUALIZACJI STRONY
 // ==========================================
-const APP_VERSION = "1.3.3"; // WERSJA APLIKACJI
-
-const updateStyle = document.createElement('style');
-updateStyle.innerHTML = `
-.update-notify {
-    position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
-    background: var(--accent-color, #38bdf8); color: #000;
-    padding: 15px 30px; border-radius: 50px; z-index: 10000;
-    font-weight: 900; display: flex; align-items: center; gap: 15px;
-    box-shadow: 0 10px 40px rgba(0,0,0,0.8), 0 0 20px var(--accent-color, #38bdf8);
-    animation: slideDownUpdate 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-    border: 2px solid white;
-}
-@keyframes slideDownUpdate {
-    from { top: -100px; opacity: 0; }
-    to { top: 20px; opacity: 1; }
-}
-.update-btn-refresh {
-    background: white; color: var(--accent-color, #38bdf8);
-    border: none; padding: 8px 20px; border-radius: 20px;
-    cursor: pointer; font-weight: 900; text-transform: uppercase; transition: 0.2s;
-}
-.update-btn-refresh:hover { transform: scale(1.1); background: #f1f5f9; }
-`;
-document.head.appendChild(updateStyle);
-
 async function checkUpdates() {
     try {
         const response = await fetch(`version.json?t=${new Date().getTime()}`);
         const data = await response.json();
-        if (data.version && data.version !== APP_VERSION) {
+        const serverVersion = data.version.trim();
+        console.log(`[SYSTEM] Wersja lokalna: ${APP_VERSION} | Wersja na serwerze: ${serverVersion}`);
+        if (serverVersion !== APP_VERSION) {
             showUpdatePrompt();
         }
-    } catch (e) { }
+    } catch (e) {
+        // Ciche ignorowanie błędu
+    }
 }
 
 function showUpdatePrompt() {
@@ -698,25 +681,21 @@ function showUpdatePrompt() {
 }
 
 window.forceHardReload = async function() {
-    // 1. Ubicie Service Workerów (jeśli jakieś są i blokują odświeżanie)
+    console.log("[SYSTEM] Inicjowanie twardego przeładowania...");
     if ('serviceWorker' in navigator) {
         const registrations = await navigator.serviceWorker.getRegistrations();
         for (let reg of registrations) {
             await reg.unregister();
         }
     }
-    
-    // 2. Twarde czyszczenie pamięci podręcznej przeglądarki (Cache Storage API)
     if ('caches' in window) {
         const cacheNames = await caches.keys();
         for (let name of cacheNames) {
             await caches.delete(name);
         }
     }
-    
-    // 3. Wymuszenie pobrania świeżych plików poprzez dodanie unikalnego znacznika czasu do linku
     window.location.href = window.location.pathname + '?refresh=' + new Date().getTime();
 };
 
 setInterval(checkUpdates, 60000);
-setTimeout(checkUpdates, 5000);
+setTimeout(checkUpdates, 3000);

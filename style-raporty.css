@@ -892,3 +892,44 @@ header h1 {
     text-transform: uppercase; 
     border: 1px solid rgba(239, 68, 68, 0.2);
 }
+
+/* ==========================================================================
+   SYSTEM AKTUALIZACJI (POWIADOMIENIE)
+   ========================================================================== */
+.update-notify {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--accent-color);
+    color: #000;
+    padding: 15px 30px;
+    border-radius: 50px;
+    z-index: 10000;
+    font-weight: 900;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.8), 0 0 20px var(--accent-color);
+    animation: slideDownUpdate 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    border: 2px solid white;
+}
+@keyframes slideDownUpdate {
+    from { top: -100px; opacity: 0; }
+    to { top: 20px; opacity: 1; }
+}
+.update-btn-refresh {
+    background: white;
+    color: var(--accent-color);
+    border: none;
+    padding: 8px 20px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-weight: 900;
+    text-transform: uppercase;
+    transition: var(--transition-fast);
+}
+.update-btn-refresh:hover {
+    transform: scale(1.1);
+    background: #f1f5f9;
+}
