@@ -1,7 +1,7 @@
 // ==========================================
 // WERSJA APLIKACJI (Zmień, aby wymusić odświeżenie u wszystkich)
 // ==========================================
-const APP_VERSION = "1.3.5";
+const APP_VERSION = "1.3.6";
 
 // ==========================================
 // KONFIGURACJA
@@ -675,7 +675,7 @@ function showUpdatePrompt() {
     div.className = 'update-notify';
     div.innerHTML = `
         <span><i class="fas fa-sync-alt fa-spin"></i> Wgrano nową wersję systemu!</span>
-        <button class="update-btn-refresh" onclick="forceHardReload()">Odśwież teraz</button>
+        <button class="update-btn-refresh" onclick="forceHardReload()">Odśwież</button>
     `;
     document.body.appendChild(div);
 }

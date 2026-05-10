@@ -817,7 +817,7 @@ header h1 {
     cursor: pointer;
     font-weight: 900;
     text-transform: uppercase;
-    transition: var(--transition-fast);
+    transition: 0.2s ease;
 }
 .update-btn-refresh:hover {
     transform: scale(1.1);
