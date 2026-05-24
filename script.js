@@ -1,7 +1,8 @@
 // ==========================================
-// WERSJA APLIKACJI (Zmień, aby wymusić odświeżenie u wszystkich)
+// WERSJA APLIKACJI
 // ==========================================
-const APP_VERSION = "1.3.6";
+const APP_VERSION = "3.5.0";
+let LATEST_CHANGELOG_VERSION = APP_VERSION; // Używana globalnie do kropki powiadomień
 
 // ==========================================
 // KONFIGURACJA
@@ -12,35 +13,36 @@ const PIN_API_URL = "https://script.google.com/macros/s/AKfycbycnbsg8yC8Cqk0tF-6
 // Baza Raportów:
 const REPORTS_API_URL = "https://script.google.com/macros/s/AKfycbwcbHTDSA5H0LO2hWYmBleL0z74CXyLYzm188cvhnQBLdbmrOw0r5OMj7QyPXivMZfzeg/exec";
 
-// Główna, domyślna baza przedmiotów (bez pustych pól na start)
+// Główna, domyślna baza przedmiotów
 const defaultInventory = [
     { name: "Zdobiona książka", min: 120, max: 120, category: "inne" },
     { name: "Dywan", min: 240, max: 240, category: "dom" },
-    { name: "Komputer (laptop)", min: 570, max: 600, category: "elektronika" },
-    { name: "Komputer (stacjonarny)", min: 640, max: 680, category: "elektronika" },
-    { name: "Konsola", min: 370, max: 400, category: "elektronika" },
-    { name: "Konsola DJ", min: 600, max: 640, category: "elektronika" },
-    { name: "Kobieca plastikowa figurka", min: 90, max: 90, category: "inne" },
+    { name: "Komputer (laptop)", min: 600, max: 600, category: "elektronika" },
+    { name: "Komputer (stacjonarny)", min: 680, max: 680, category: "elektronika" },
+    { name: "Konsola", min: 400, max: 400, category: "elektronika" },
+    { name: "Konsola DJ", min: 640, max: 640, category: "elektronika" },
+    { name: "Kobieca plastikowa figurka", min: 100, max: 100, category: "inne" },
     { name: "Plastikowa figurka małpki", min: 80, max: 80, category: "inne" },
-    { name: "Kwiat", min: 60, max: 60, category: "dom" },
-    { name: "Gitara elektryczna", min: 440, max: 480, category: "elektronika" },
-    { name: "Dziwna substancja", min: 90, max: 90, category: "inne" },
+    { name: "Kwiat", min: 65, max: 65, category: "dom" },
+    { name: "Gitara elektryczna", min: 480, max: 480, category: "elektronika" },
+    { name: "Dziwna substancja", min: 100, max: 100, category: "inne" },
     { name: "Dziwna szara substancja", min: 160, max: 160, category: "inne" },
-    { name: "Biżuteria", min: 210, max: 240, category: "biżuteria" },
-    { name: "Brudna biżuteria", min: 130, max: 150, category: "biżuteria" },
+    { name: "Biżuteria", min: 240, max: 240, category: "biżuteria" },
+    { name: "Brudna biżuteria", min: 150, max: 150, category: "biżuteria" },
     { name: "Katana", min: 480, max: 480, category: "inne" },
-    { name: "Mikrofala", min: 250, max: 280, category: "dom" },
-    { name: "Mikser", min: 130, max: 160, category: "dom" },
-    { name: "Monitor", min: 120, max: 140, category: "elektronika" },
-    { name: "Obraz", min: 110, max: 110, category: "dom" },
-    { name: "Obraz ścienny", min: 175, max: 175, category: "dom" },
-    { name: "Głośnik", min: 120, max: 145, category: "elektronika" },
-    { name: "Telewizor", min: 570, max: 600, category: "elektronika" },
-    { name: "Zegarek", min: 140, max: 160, category: "biżuteria" },
+    { name: "Mikrofala", min: 280, max: 280, category: "dom" },
+    { name: "Mikser", min: 160, max: 160, category: "dom" },
+    { name: "Monitor", min: 150, max: 150, category: "elektronika" },
+    { name: "Obraz", min: 115, max: 115, category: "dom" },
+    { name: "Obraz ścienny", min: 180, max: 180, category: "dom" },
+    { name: "Głośnik", min: 145, max: 145, category: "elektronika" },
+    { name: "Telewizor", min: 600, max: 600, category: "elektronika" },
+    { name: "Zegarek", min: 160, max: 160, category: "biżuteria" },
     { name: "Złota bransoletka", min: 200, max: 200, category: "biżuteria" },
-    { name: "Złota moneta z prezydentem", min: 100, max: 100, category: "inne" },
+	{ name: "Złota moneta", min: 200, max: 200, category: "inne" },
+    { name: "Złota moneta z prezydentem", min: 200, max: 200, category: "inne" },
     { name: "Złote kolczyki", min: 200, max: 200, category: "biżuteria" },
-    { name: "Popsuty telefon", min: 90, max: 95, category: "elektronika" }
+    { name: "Popsuty telefon", min: 95, max: 95, category: "elektronika" }
 ];
 
 let inventory = [];
@@ -49,8 +51,20 @@ let currentCategory = 'wszystkie';
 let currentMinTotal = 0; 
 let currentMaxTotal = 0; 
 let currentEmployeeName = ""; 
+let currentEmployeeRank = "Pracownik"; 
+let currentEmployeeSsn = "---"; 
+let currentEmployeeDateZatrudnienia = "---"; 
+let currentEmployeePhoto = ""; // NOWA ZMIENNA GLOBALNA NA ZDJĘCIE
 // BLOKADA PODWÓJNEGO NALICZANIA UTARGU
 let isStatAddedForCurrentReceipt = false;
+
+// Zmienna do raportowania błędu transakcji
+let currentReportReceiptId = "";
+
+// Do statystyk globalnych pracownika
+let myStatsRawData = [];
+let currentStatsType = 'skup';
+let currentStatsRange = 'today';
 
 function getFormattedDate() {
     const now = new Date();
@@ -60,7 +74,6 @@ function getFormattedDate() {
     return `${day}.${month}.${year}`;
 }
 
-// NOWA FUNKCJA Z GODZINĄ
 function getFormattedDateTime() {
     const now = new Date();
     const day = String(now.getDate()).padStart(2, '0');
@@ -72,6 +85,25 @@ function getFormattedDateTime() {
     return `${day}.${month}.${year} ${hours}:${minutes}:${seconds}`;
 }
 
+// Funkcja parsująca daty przychodzące z Google Sheets
+function parseDate(dateStr) {
+    if (!dateStr) return new Date();
+    if (typeof dateStr === 'string' && dateStr.includes("T")) {
+        return new Date(dateStr); 
+    }
+    const parts = String(dateStr).split(" ");
+    const dateParts = parts[0].split(".");
+    if (dateParts.length !== 3) return new Date(dateStr);
+    const d = new Date(dateParts[2], dateParts[1] - 1, dateParts[0]);
+    if (parts[1]) {
+        const timeParts = parts[1].split(":");
+        d.setHours(timeParts[0] || 0, timeParts[1] || 0, timeParts[2] || 0, 0);
+    } else {
+        d.setHours(0, 0, 0, 0);
+    }
+    return d;
+}
+
 function generateID() {
     const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     let res = 'EC-';
@@ -79,7 +111,105 @@ function generateID() {
     return res;
 }
 
-// NOWE FUNKCJE: STATYSTYKI PRACOWNIKA
+// NASŁUCHIWANIE SCROLLA DLA NAVBARA
+document.addEventListener('scroll', function() {
+    const navbar = document.querySelector('.navbar');
+    if (window.scrollY > 50) {
+        navbar.classList.add('scrolled');
+    } else {
+        navbar.classList.remove('scrolled');
+    }
+});
+
+// ==========================================
+// SYSTEM LOGOWANIA
+// ==========================================
+window.login = async function() {
+    const pin = document.getElementById('employee-login-pin').value;
+    const btn = document.getElementById('login-btn');
+    if (!pin) return showNotice("Wprowadź PIN!", "danger");
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Weryfikacja...';
+
+    try {
+        const response = await fetch(`${PIN_API_URL}?pin=${pin}`);
+        const data = await response.json();
+
+        if (data.isValid) {
+            currentEmployeeName = data.name;
+            currentEmployeeRank = data.rank || "Pracownik"; 
+            currentEmployeeSsn = data.ssn || "---"; 
+            currentEmployeeDateZatrudnienia = data.dateZatrudnienia || "Brak danych";
+            currentEmployeePhoto = data.photo || ""; // POBIERANIE ZDJĘCIA Z BAZY
+            
+            // UKRYTY PANEL TYLKO DLA TRAVIS VANCE
+            if (currentEmployeeName.toLowerCase() === "travis vance") {
+                document.getElementById('admin-changelog-btn').style.display = 'flex';
+            } else {
+                document.getElementById('admin-changelog-btn').style.display = 'none';
+            }
+
+            document.getElementById('logged-user-name').innerText = currentEmployeeName.toUpperCase();
+            document.getElementById('login-screen').classList.remove('active');
+            
+            document.getElementById('main-app').style.display = 'block';
+            document.getElementById('user-profile').style.display = 'block';
+            
+            const banner = document.getElementById('announcement-banner');
+            if(banner) banner.style.display = 'flex';
+
+            showNotice(`Rozpoczęto zmianę: ${data.name}`, "success");
+            
+            init();
+        } else {
+            showNotice("Nieprawidłowy PIN!", "danger");
+        }
+    } catch (error) {
+        showNotice("Błąd połączenia z bazą PIN!", "danger");
+        console.error(error);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = 'Odblokuj system <i class="fas fa-unlock"></i>';
+    }
+}
+
+window.logout = function() {
+    currentEmployeeName = "";
+    currentEmployeeRank = "Pracownik";
+    currentEmployeeSsn = "---";
+    currentEmployeeDateZatrudnienia = "---";
+    currentEmployeePhoto = ""; // CZYSZCZENIE ZDJĘCIA PRZY WYLOGOWANIU
+    document.getElementById('employee-login-pin').value = "";
+    document.getElementById('logged-user-name').innerText = "---";
+    document.getElementById('login-screen').classList.add('active');
+    
+    document.getElementById('main-app').style.display = 'none';
+    document.getElementById('user-profile').style.display = 'none';
+    document.getElementById('user-dropdown').classList.remove('active');
+    document.getElementById('admin-changelog-btn').style.display = 'none';
+    
+    const banner = document.getElementById('announcement-banner');
+    if(banner) banner.style.display = 'none';
+
+    resetCartAndInventory();
+    showNotice("Zakończono zmianę. Wylogowano.", "info");
+}
+
+window.toggleUserMenu = function() {
+    document.getElementById('user-dropdown').classList.toggle('active');
+}
+
+// Zamykanie dropdowna kliknięciem poza nim
+document.addEventListener('click', function(event) {
+    const profile = document.getElementById('user-profile');
+    const dropdown = document.getElementById('user-dropdown');
+    if (profile && dropdown && !profile.contains(event.target)) {
+        dropdown.classList.remove('active');
+    }
+});
+
+// STATYSTYKI PRACOWNIKA (Lokale Storage - tylko w tle do zliczania live)
 function getDailyStat(employeeName) {
     const date = getFormattedDate();
     const key = `elcartel_stats_${employeeName}_${date}`;
@@ -93,31 +223,26 @@ function addDailyStat(employeeName, amount) {
     localStorage.setItem(key, current + amount);
 }
 
-// Funkcja resetująca cały koszyk i listę przedmiotów do stanu domyślnego
 function resetCartAndInventory() {
-    // 1. Odtwarzamy oryginalną bazę przedmiotów
     inventory = JSON.parse(JSON.stringify(defaultInventory));
     counts = {};
     
-    // 2. Zerujemy liczniki
-    inventory.forEach((_, index) => {
-        counts[index] = 0;
-    });
+    inventory.forEach((_, index) => { counts[index] = 0; });
 
-    // 3. Czyścimy pole kwoty transakcji
     const finalPriceInput = document.getElementById('final-price-input');
     if (finalPriceInput) finalPriceInput.value = "";
+    
+    const ssnInput = document.getElementById('customer-ssn-input');
+    if (ssnInput) ssnInput.value = "";
 
-    // 4. Przebudowujemy interfejs
     renderInventory();
     calculateTotal();
 }
 
 function renderInventory() {
     const list = document.getElementById('items-list');
-    list.innerHTML = ''; // Czyścimy starą listę
+    list.innerHTML = ''; 
     
-    // Sortujemy wizualnie: najpierw niestandardowe, potem zwykłe
     const customCards = [];
     const normalCards = [];
 
@@ -159,26 +284,215 @@ function renderInventory() {
         }
     });
     
-    // Dodajemy najpierw własne pola, a potem resztę standardową
     customCards.forEach(c => list.appendChild(c));
     normalCards.forEach(c => list.appendChild(c));
     
-    // Zastosuj aktualne filtry po przebudowie
     applyFilters();
 }
 
 function init() {
     document.getElementById('header-date').innerText = getFormattedDate();
-    
-    // Ładowanie domyślnego asortymentu
     resetCartAndInventory();
     
     document.getElementById('ad-input').addEventListener('input', updateAdPreview);
     updateAdPreview();
-    updateCartView(); // Wywołanie przy starcie dla pustego koszyka
+    updateCartView(); 
+    fetchChangelogData(); // Pobiera najnowszy changelog na start
 }
 
-// LOGIKA PŁYWAJĄCEGO CENNIKA (STICKY NOTE)
+// ==========================================
+// SYSTEM POWIADOMIEŃ I DYNAMICZNEGO CHANGELOGA
+// ==========================================
+async function fetchChangelogData() {
+    try {
+        const response = await fetch(`${REPORTS_API_URL}?action=get_reports&t=${new Date().getTime()}`);
+        const data = await response.json();
+        
+        const clData = data.filter(r => r.type === "changelog");
+        if (clData.length > 0) {
+            const grouped = {};
+            clData.forEach(r => {
+                if (!grouped[r.report_id]) grouped[r.report_id] = { date: r.date, items: [] };
+                grouped[r.report_id].items.push(r.name);
+            });
+            
+            // Sortowanie wersji od najnowszej do najstarszej
+            const sortedVersions = Object.keys(grouped).reverse();
+            
+            const container = document.getElementById('dynamic-changelog-container');
+            if(container && sortedVersions.length > 0) {
+                LATEST_CHANGELOG_VERSION = sortedVersions[0]; // Zapisujemy najnowszą z bazy
+                container.innerHTML = ""; // Czyścimy starą, sztywną listę
+                
+                sortedVersions.forEach((v, index) => {
+                    const dateLabel = index === 0 ? "Najnowsza" : grouped[v].date.split(' ')[0];
+                    let listHtml = "";
+                    
+                    // Obcięcie literki 'v' używanej by chronić przed konwersją na datę w Google Sheets
+                    let displayVersion = v;
+                    if (v.startsWith('v')) {
+                        displayVersion = v.substring(1);
+                    }
+                    
+                    grouped[v].items.forEach(itemStr => {
+                        let tag = "INFO";
+                        let desc = itemStr;
+                        // Odkodowanie tagu z nazwy
+                        if(itemStr.includes('|||')) {
+                            const parts = itemStr.split('|||');
+                            tag = parts[0];
+                            desc = parts[1];
+                        }
+                        
+                        let clClass = tag === "NOWOŚĆ" ? "cl-new" : (tag === "POPRAWKA" ? "cl-fix" : "cl-tag");
+                        listHtml += `<li><span class="cl-tag ${clClass}">${tag}</span> ${desc}</li>`;
+                    });
+                    
+                    container.innerHTML += `
+                        <div class="changelog-item">
+                            <div class="changelog-version-header">
+                                Wersja ${displayVersion} <span class="changelog-date">${dateLabel}</span>
+                            </div>
+                            <ul class="changelog-list">${listHtml}</ul>
+                        </div>
+                    `;
+                });
+                checkChangelogNotification();
+            }
+        }
+    } catch(e) {
+        console.log("Nie udało się pobrać dynamicznego changeloga", e);
+        checkChangelogNotification(); // Fallback na stałą wersję
+    }
+}
+
+function checkChangelogNotification() {
+    const seenVersion = localStorage.getItem('elcartel_changelog_seen');
+    const navDot = document.getElementById('nav-notification-dot');
+    const dropDot = document.getElementById('dropdown-notification-dot');
+    
+    if (seenVersion !== LATEST_CHANGELOG_VERSION) {
+        if (navDot) navDot.classList.remove('hidden');
+        if (dropDot) dropDot.classList.remove('hidden');
+    } else {
+        if (navDot) navDot.classList.add('hidden');
+        if (dropDot) dropDot.classList.add('hidden');
+    }
+}
+
+window.openChangelog = function() {
+    document.getElementById('user-dropdown').classList.remove('active');
+    document.getElementById('changelog-modal').classList.add('active');
+    
+    localStorage.setItem('elcartel_changelog_seen', LATEST_CHANGELOG_VERSION);
+    checkChangelogNotification(); 
+}
+
+window.closeChangelog = function() {
+    document.getElementById('changelog-modal').classList.remove('active');
+}
+
+// ==========================================
+// ADMIN: DODAWANIE CHANGELOGA
+// ==========================================
+window.openAdminChangelog = function() {
+    document.getElementById('user-dropdown').classList.remove('active');
+    document.getElementById('admin-changelog-modal').classList.add('active');
+    if(document.getElementById('admin-changes-list').children.length === 0) {
+        addAdminChangeSlot();
+    }
+}
+
+window.closeAdminChangelog = function() {
+    document.getElementById('admin-changelog-modal').classList.remove('active');
+}
+
+window.addAdminChangeSlot = function() {
+    const container = document.getElementById('admin-changes-list');
+    const div = document.createElement('div');
+    div.style.display = 'flex';
+    div.style.gap = '10px';
+    div.style.alignItems = 'center';
+    div.innerHTML = `
+        <select class="custom-input admin-change-tag" style="width: 120px; padding: 10px;">
+            <option value="NOWOŚĆ">NOWOŚĆ</option>
+            <option value="POPRAWKA">POPRAWKA</option>
+            <option value="USUNIĘTO">USUNIĘTO</option>
+        </select>
+        <input type="text" class="custom-input admin-change-desc" placeholder="Opis zmiany..." style="flex: 1; padding: 10px;">
+        <button type="button" class="settings-close-btn" style="width: 40px; height: 40px; flex-shrink: 0;" onclick="this.parentElement.remove()">
+            <i class="fas fa-trash"></i>
+        </button>
+    `;
+    container.appendChild(div);
+}
+
+window.publishChangelog = async function() {
+    const version = document.getElementById('admin-version-input').value.trim();
+    if (!version) return showNotice("Podaj numer wersji!", "warning");
+    
+    const rows = document.querySelectorAll('#admin-changes-list > div');
+    if (rows.length === 0) return showNotice("Dodaj co najmniej jedną zmianę!", "warning");
+    
+    let itemsToLog = [];
+    let valid = true;
+    
+    rows.forEach(row => {
+        const tag = row.querySelector('.admin-change-tag').value;
+        const desc = row.querySelector('.admin-change-desc').value.trim();
+        if (!desc) valid = false;
+        
+        itemsToLog.push({
+            name: `${tag}|||${desc}`,
+            qty: 1,
+            total: 0
+        });
+    });
+    
+    if (!valid) return showNotice("Wypełnij opisy wszystkich zmian!", "warning");
+    
+    const btn = document.getElementById('publish-changelog-btn');
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Zapisywanie...';
+    
+    // Dodajemy "v" na początku, żeby Google Sheets nie zmieniło wersji na datę (np. "3.4.0" -> "v3.4.0")
+    const safeVersion = "v" + version;
+    
+    const logPayload = {
+        action: "save_receipt",
+        type: "changelog",
+        date: getFormattedDateTime(),
+        employee: currentEmployeeName,
+        report_id: safeVersion, 
+        items: itemsToLog
+    };
+    
+    try {
+        // Usunięto wysyłanie na Discord zgodnie z prośbą
+        
+        await fetch(REPORTS_API_URL, {
+            method: "POST",
+            body: JSON.stringify(logPayload)
+        });
+        
+        showNotice("Changelog opublikowany pomyślnie!", "success");
+        closeAdminChangelog();
+        document.getElementById('admin-version-input').value = "";
+        document.getElementById('admin-changes-list').innerHTML = "";
+        
+        fetchChangelogData(); // Odświeża listę od razu po dodaniu
+        
+    } catch(e) {
+        showNotice("Błąd publikacji!", "danger");
+        console.error(e);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+    }
+}
+
+
 window.toggleWidget = function() {
     const widget = document.getElementById('dynamic-price-widget');
     const icon = document.getElementById('widget-toggle-icon');
@@ -192,7 +506,6 @@ window.toggleWidget = function() {
     }
 }
 
-// DYNAMICZNE DODAWANIE KOLEJNYCH PUSTYCH PÓL
 window.addCustomItemSlot = function() {
     const index = inventory.length;
     inventory.push({ name: "Własny przedmiot", min: 0, max: 0, category: "inne", isCustom: true });
@@ -202,10 +515,8 @@ window.addCustomItemSlot = function() {
     showNotice("Dodano nowe pole na własny przedmiot!", "success");
 }
 
-// Funkcje do obsługi Custom Item
 window.updateCustomName = function(index, value) {
     inventory[index].name = value || "Własny przedmiot";
-    // Zabezpieczenie przed błędem indeksów po dodaniu nowych pól:
     const inputField = document.getElementById(`custom-name-${index}`);
     if(inputField) {
         const card = inputField.closest('.item-card');
@@ -242,19 +553,20 @@ function calculateTotal() {
     currentMinTotal = min; 
     currentMaxTotal = max; 
     document.getElementById('total-price').innerText = min + '$';
-    document.getElementById('bonus-range').innerText = '+' + (max - min) + '$';
     
-    // Aktualizacja widoku koszyka bocznego
+    const bonusEl = document.getElementById('bonus-range');
+    if (bonusEl) {
+        bonusEl.innerText = '+' + (max - min) + '$';
+    }
+    
     updateCartView();
 }
 
-// Włączanie i wyłączanie koszyka
 window.toggleCart = function() {
     const sidebar = document.getElementById('cart-sidebar');
     if (sidebar) sidebar.classList.toggle('active');
 };
 
-// Aktualizacja zawartości koszyka (+/- przyciski wewnatrz)
 function updateCartView() {
     const container = document.getElementById('cart-items-container');
     const badge = document.getElementById('cart-badge');
@@ -306,13 +618,16 @@ function applyFilters() {
     const term = document.getElementById('search-input').value.toLowerCase();
     const adSection = document.getElementById('ad-section');
     const itemsList = document.getElementById('items-list');
+    const asortymentHeader = document.getElementById('asortyment-header-wrapper');
 
     if (currentCategory === 'reklama') {
         if(adSection) adSection.classList.remove('hidden');
         if(itemsList) itemsList.classList.add('hidden');
+        if(asortymentHeader) asortymentHeader.classList.add('hidden');
     } else {
         if(adSection) adSection.classList.add('hidden');
         if(itemsList) itemsList.classList.remove('hidden');
+        if(asortymentHeader) asortymentHeader.classList.remove('hidden');
         document.querySelectorAll('.item-card').forEach(card => {
             const name = card.getAttribute('data-name') || '';
             const cat = card.getAttribute('data-category') || '';
@@ -326,8 +641,8 @@ window.generateQuote = async function() {
     const hasItems = Object.values(counts).some(c => c > 0);
     const finalPriceInput = document.getElementById('final-price-input');
     const finalPrice = parseFloat(finalPriceInput.value);
-    const pinInput = document.getElementById('employee-pin-input');
-    const pin = pinInput ? pinInput.value : "";
+    const ssnInput = document.getElementById('customer-ssn-input');
+    currentCustomerSSN = ssnInput ? ssnInput.value.trim() : "";
 
     if (!hasItems) return showNotice("Koszyk jest pusty!", "warning");
     
@@ -336,63 +651,49 @@ window.generateQuote = async function() {
     }
     
     if (finalPrice < currentMinTotal) {
-        return showNotice(`Kwota zbyt niska! Minimum to ${currentMinTotal}$.`, "danger");
+        return showNotice(`Kwota zbyt niska! Wymagane: ${currentMinTotal}$.`, "danger");
     }
 
     if (finalPrice > currentMaxTotal) {
-        return showNotice(`Kwota zbyt wysoka! Maksimum to ${currentMaxTotal}$.`, "danger");
+        return showNotice(`Kwota zbyt wysoka! Wymagane: ${currentMaxTotal}$.`, "danger");
     }
-
-    if (!pin) return showNotice("Wprowadź PIN pracownika!", "warning");
 
     const btn = document.getElementById('quote-btn');
     const originalBtnHtml = btn.innerHTML;
     btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Weryfikacja...';
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Przetwarzanie...';
 
-    try {
-        // SPRAWDZANIE PINU W STARYM ARKUSZU
-        const response = await fetch(`${PIN_API_URL}?pin=${pin}`);
-        const data = await response.json();
-
-        if (data.isValid) {
-            currentEmployeeName = data.name;
-            showNotice(`Zalogowano jako: ${currentEmployeeName}`, "success");
-            
-            finalizeQuote(currentEmployeeName, finalPrice);
-        } else {
-            showNotice("Nieprawidłowy PIN!", "danger");
-        }
-    } catch (error) {
-        showNotice("Błąd połączenia z bazą PIN!", "danger");
-        console.error(error);
-    } finally {
+    setTimeout(() => {
+        finalizeQuote(currentEmployeeName, finalPrice);
         btn.disabled = false;
         btn.innerHTML = originalBtnHtml;
-    }
+    }, 400);
 }
 
 function finalizeQuote(employeeName, finalPrice) {
-    // RESETUJEMY BLOKADĘ PODWÓJNEGO NALICZANIA DLA NOWEGO PARAGONU
     isStatAddedForCurrentReceipt = false;
     
     const receiptID = generateID();
     document.getElementById('current-receipt-date').innerText = getFormattedDate();
     document.getElementById('receipt-id-display').innerText = `NR: ${receiptID}`;
-    document.getElementById('receipt-employee-display').innerText = `PRAC.: ${employeeName.toUpperCase()}`;
+    
+    let employeeText = `PRACOWNIK: ${employeeName.toUpperCase()}`;
+    if (currentCustomerSSN !== "") {
+        employeeText += `<br>KLIENT (SSN): ${currentCustomerSSN}`;
+    }
+    document.getElementById('receipt-employee-display').innerHTML = employeeText;
+    
     document.getElementById('receipt-total').innerText = finalPrice + '$';
 
     const itemsDiv = document.getElementById('receipt-items');
     itemsDiv.innerHTML = '';
     
-    // Ustalanie wskaźnika proporcji, by rozbić ręczną kwotę finalPrice
     const ratio = finalPrice / currentMinTotal;
 
     inventory.forEach((item, i) => {
         if (counts[i] > 0) {
             const row = document.createElement('div');
             row.className = 'receipt-row';
-            // Cena na paragonie też jest proporcjonalnie rozbita z ręcznej kwoty
             const calculatedItemTotal = Math.round(item.min * counts[i] * ratio);
             row.innerHTML = `<span>${item.name} [x${counts[i]}]</span><span>${calculatedItemTotal}$</span>`;
             itemsDiv.appendChild(row);
@@ -406,24 +707,6 @@ function finalizeQuote(employeeName, finalPrice) {
         itemsDiv.parentNode.insertBefore(sigDiv, document.querySelector('.receipt-footer'));
     }
     sigDiv.innerHTML = `<span class="signature-label">Podpis pracownika</span><span class="signature-text">${employeeName}</span>`;
-
-    // WYŚWIETLANIE STATYSTYK W MODALU (NOWA, ELEGANCKA WERSJA)
-    const statDiv = document.getElementById('employee-stats-display');
-    if (statDiv) {
-        const currentStat = getDailyStat(employeeName);
-        const predictedStat = currentStat + finalPrice;
-        
-        statDiv.innerHTML = `
-            <div class="stat-box-inner">
-                <div class="stat-icon"><i class="fas fa-wallet"></i></div>
-                <div class="stat-details">
-                    <span class="stat-label">Twój dzisiejszy obrót po wpłacie:</span>
-                    <span class="stat-value">${predictedStat}$</span>
-                </div>
-            </div>
-        `;
-        statDiv.style.display = "block";
-    }
 
     document.getElementById('quote-modal').classList.add('active');
 }
@@ -440,15 +723,11 @@ async function sendToDiscord() {
     btn.disabled = true;
     btn.innerText = "Wysyłanie...";
 
-    // --- ZBIERANIE DANYCH DO PANELU SZEFA ---
     const itemsToLog = [];
     
-    // Kluczowa zmiana: Rozbijamy finalPrice proporcjonalnie na przedmioty
-    // Oraz radzimy sobie z "resztówką", gdyby proporcja dała po przecinku
     let remainingAmount = finalPriceNumeric;
     const ratio = finalPriceNumeric / currentMinTotal;
     
-    // Odfiltrowanie tylko tych elementów, które zostały dodane do koszyka
     const activeItems = inventory.map((item, index) => ({ item, index })).filter(x => counts[x.index] > 0);
 
     activeItems.forEach((x, arrayIndex) => {
@@ -456,7 +735,6 @@ async function sendToDiscord() {
         const count = counts[x.index];
         let calculatedTotal;
         
-        // Zabezpieczenie przed ułamkami: Ostatni produkt w koszyku bierze całą resztę (tzw. wyrównanie ułamków)
         if (arrayIndex === activeItems.length - 1) {
             calculatedTotal = remainingAmount;
         } else {
@@ -476,10 +754,9 @@ async function sendToDiscord() {
         type: "skup",
         date: getFormattedDateTime(),
         employee: currentEmployeeName,
-        report_id: receiptID, // <--- DODANO NUMER PARAGONU DO BAZY!
+        report_id: receiptID, 
         items: itemsToLog
     };
-    // -----------------------------------------
 
     try {
         const canvas = await html2canvas(area, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
@@ -487,13 +764,18 @@ async function sendToDiscord() {
             const formData = new FormData();
             formData.append("file", blob, "paragon.png");
             
+            let employeeFieldValue = `**${employee}**`;
+            if (currentCustomerSSN !== "") {
+                employeeFieldValue += `\n(Klient SSN: **${currentCustomerSSN}**)`;
+            }
+
             const embedPayload = {
                 embeds: [{
                     title: "📑 Wystawiono nowy paragon!",
                     color: 36991, 
                     fields: [
                         { name: "📋 Numer paragonu:", value: `\`${receiptID}\``, inline: true },
-                        { name: "👤 Pracownik:", value: `**${employee}**`, inline: true },
+                        { name: "👤 Pracownik:", value: employeeFieldValue, inline: true },
                         { name: "💰 Suma:", value: `**${finalPriceText}**`, inline: false }
                     ],
                     image: { url: "attachment://paragon.png" },
@@ -506,13 +788,11 @@ async function sendToDiscord() {
             
             const res = await fetch(DISCORD_WEBHOOK_URL, { method: "POST", body: formData });
             if (res.ok) {
-                // WYSYŁAMY PACZKĘ DANYCH DO NOWEGO ARKUSZA SZEFA (w tle)
                 fetch(REPORTS_API_URL, {
                     method: "POST",
                     body: JSON.stringify(logPayload)
                 }).catch(e => console.error("Błąd zapisu w arkuszu:", e));
 
-                // Dopisanie do statystyk następuje TYLKO TUTAJ
                 if (!isStatAddedForCurrentReceipt) {
                     addDailyStat(currentEmployeeName, finalPriceNumeric);
                     isStatAddedForCurrentReceipt = true;
@@ -520,10 +800,7 @@ async function sendToDiscord() {
                 
                 showNotice("Wysłano na Discord i zaktualizowano obrót!", "success");
                 
-                // AUTOMATYCZNE CZYSZCZENIE KOSZYKA PO WYSŁANIU
                 resetCartAndInventory();
-                
-                // Zamykamy okno po wysłaniu
                 closeModal();
             } else throw new Error();
         }, "image/png");
@@ -555,7 +832,6 @@ window.copyReceiptToClipboard = async function() {
                 await navigator.clipboard.write(data);
                 
                 showNotice("Skopiowano paragon do schowka!", "success");
-                // NIE dodajemy już tutaj statystyk i NIE zamykamy okna
             } catch (err) {
                 showNotice("Błąd kopiowania! Spróbuj innej przeglądarki.", "danger");
             }
@@ -600,6 +876,40 @@ window.closeModal = function() {
     document.getElementById('quote-modal').classList.remove('active'); 
 }
 
+// OTWIERANIE I ZAMYKANIE IDENTYFIKATORA
+window.openIdCard = function() {
+    document.getElementById('user-dropdown').classList.remove('active');
+    
+    if (currentEmployeeName) {
+        document.getElementById('id-card-name').innerText = currentEmployeeName.toUpperCase();
+        document.getElementById('id-card-ssn').innerText = currentEmployeeSsn;
+        document.getElementById('id-card-date-zatrudnienia').innerText = currentEmployeeDateZatrudnienia;
+        
+        // --- LOGIKA DLA ZDJĘCIA ---
+        const photoContainer = document.querySelector('#id-card-modal .id-photo-box');
+        if (currentEmployeePhoto && currentEmployeePhoto !== "") {
+            // Jeśli jest link, wstawiamy obrazek
+            photoContainer.innerHTML = `<img src="${currentEmployeePhoto}" alt="Zdjęcie postaci" class="id-photo-img">`;
+        } else {
+            // Jeśli nie ma, wstawiamy domyślną ikonę
+            photoContainer.innerHTML = `<i class="fas fa-user-tie"></i>`;
+        }
+        // -------------------------
+
+        const signatureEl = document.getElementById('id-card-signature');
+        if (signatureEl) signatureEl.innerText = currentEmployeeName;
+
+        // Pojedyncze podświetlone stanowisko
+        document.getElementById('id-card-rank-container').innerHTML = `<span class="active-rank">${currentEmployeeRank}</span>`;
+    }
+    
+    document.getElementById('id-card-modal').classList.add('active');
+}
+
+window.closeIdCard = function() {
+    document.getElementById('id-card-modal').classList.remove('active');
+}
+
 window.showNotice = function(msg, type) {
     const t = document.createElement('div');
     t.className = `toast ${type}`;
@@ -608,15 +918,12 @@ window.showNotice = function(msg, type) {
     setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 500); }, 3000);
 }
 
-// PRZYCISK KOSZA (RESET RĘCZNY)
 document.getElementById('reset-btn').onclick = () => {
     resetCartAndInventory();
     showNotice("Wyczyszczono koszyk!", "warning");
 };
 
-// Podpięcie zdarzeń przy starcie
 document.addEventListener('DOMContentLoaded', () => {
-    init();
     
     const sendBtn = document.getElementById('send-discord-btn');
     if(sendBtn) sendBtn.onclick = sendToDiscord;
@@ -628,14 +935,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Enter') generateQuote();
     };
     
-    const pinInput = document.getElementById('employee-pin-input');
-    if(pinInput) pinInput.addEventListener('keypress', triggerGenerateQuote);
-    
     const finalPriceInput = document.getElementById('final-price-input');
     if(finalPriceInput) finalPriceInput.addEventListener('keypress', triggerGenerateQuote);
+
+    const loginPinInput = document.getElementById('employee-login-pin');
+    if (loginPinInput) {
+        loginPinInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') login();
+        });
+    }
 });
 
-// FUNKCJA ZWIJANIA PASKA NA MOBILE
 window.toggleSummary = function() {
     const bar = document.getElementById('summary-bar');
     const icon = document.getElementById('toggle-icon');
@@ -651,9 +961,6 @@ window.toggleSummary = function() {
     }
 }
 
-// ==========================================
-// SYSTEM AUTOMATYCZNEJ AKTUALIZACJI STRONY
-// ==========================================
 async function checkUpdates() {
     try {
         const response = await fetch(`version.json?t=${new Date().getTime()}`);
@@ -661,27 +968,33 @@ async function checkUpdates() {
         const serverVersion = data.version.trim();
         console.log(`[SYSTEM] Wersja lokalna: ${APP_VERSION} | Wersja na serwerze: ${serverVersion}`);
         if (serverVersion !== APP_VERSION) {
-            showUpdatePrompt();
+            if (localStorage.getItem('update_ignored_version') === serverVersion) {
+                return;
+            }
+            showUpdatePrompt(serverVersion);
         }
     } catch (e) {
         // Ciche ignorowanie błędu
     }
 }
 
-function showUpdatePrompt() {
+function showUpdatePrompt(serverVersion) {
     if (document.getElementById('update-prompt')) return;
     const div = document.createElement('div');
     div.id = 'update-prompt';
     div.className = 'update-notify';
     div.innerHTML = `
         <span><i class="fas fa-sync-alt fa-spin"></i> Wgrano nową wersję systemu!</span>
-        <button class="update-btn-refresh" onclick="forceHardReload()">Odśwież</button>
+        <button class="update-btn-refresh" onclick="forceHardReload('${serverVersion}')">Odśwież</button>
     `;
     document.body.appendChild(div);
 }
 
-window.forceHardReload = async function() {
+window.forceHardReload = async function(serverVersion) {
     console.log("[SYSTEM] Inicjowanie twardego przeładowania...");
+    if (serverVersion) {
+        localStorage.setItem('update_ignored_version', serverVersion);
+    }
     if ('serviceWorker' in navigator) {
         const registrations = await navigator.serviceWorker.getRegistrations();
         for (let reg of registrations) {
@@ -699,3 +1012,381 @@ window.forceHardReload = async function() {
 
 setInterval(checkUpdates, 60000);
 setTimeout(checkUpdates, 3000);
+
+// ==========================================
+// SYSTEM USTAWIEŃ (ZMIANA PIN)
+// ==========================================
+window.openSettings = function() {
+    document.getElementById('user-dropdown').classList.remove('active');
+    document.getElementById('settings-modal').classList.add('active');
+}
+
+window.closeSettings = function() {
+    document.getElementById('settings-modal').classList.remove('active');
+    document.getElementById('old-pin-input').value = '';
+    document.getElementById('new-pin-input').value = '';
+    document.getElementById('new-pin-confirm').value = '';
+}
+
+window.changeEmployeePin = async function() {
+    const oldPin = document.getElementById('old-pin-input').value;
+    const newPin = document.getElementById('new-pin-input').value;
+    const confirmPin = document.getElementById('new-pin-confirm').value;
+
+    if (!oldPin || !newPin || !confirmPin) {
+        return showNotice("Wypełnij wszystkie pola!", "warning");
+    }
+    if (newPin !== confirmPin) {
+        return showNotice("Nowe kody PIN nie są identyczne!", "danger");
+    }
+    if (newPin.length < 4) {
+        return showNotice("Nowy PIN musi mieć dokładnie 4 cyfry!", "warning");
+    }
+    if (oldPin === newPin) {
+        return showNotice("Nowy PIN musi różnić się od starego!", "warning");
+    }
+
+    const btn = document.getElementById('change-pin-btn');
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Zapisywanie...';
+
+    try {
+        const response = await fetch(PIN_API_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+                action: 'change_pin',
+                old_pin: oldPin,
+                new_pin: newPin,
+                name: currentEmployeeName
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showNotice("Twój PIN został pomyślnie zmieniony!", "success");
+            closeSettings();
+        } else {
+            showNotice(data.message || "Błąd zmiany PINu! Prawdopodobnie wpisałeś zły obecny PIN.", "danger");
+        }
+    } catch (e) {
+        showNotice("Błąd połączenia z bazą danych!", "danger");
+        console.error(e);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+    }
+}
+
+// ==========================================
+// SYSTEM STATYSTYK PRACOWNIKA (MODAL)
+// ==========================================
+window.openMyStats = async function() {
+    document.getElementById('user-dropdown').classList.remove('active');
+    document.getElementById('my-stats-modal').classList.add('active');
+    
+    document.getElementById('my-stats-loader').classList.remove('hidden');
+    document.getElementById('my-stats-content').classList.add('hidden');
+    
+    try {
+        const response = await fetch(`${REPORTS_API_URL}?action=get_reports&t=${new Date().getTime()}`);
+        const rawData = await response.json();
+        
+        // Zapisujemy wszystkie dane przypisane do pracownika
+        myStatsRawData = rawData.filter(row => row.employee === currentEmployeeName);
+        
+        // Domyślnie ładujemy dzisiejsze dane dla skupu
+        document.getElementById('my-stats-time-filter').value = 'today';
+        currentStatsType = 'skup';
+        currentStatsRange = 'today';
+        
+        document.getElementById('btn-stats-skup').classList.add('active');
+        document.getElementById('btn-stats-sprzedaz').classList.remove('active');
+
+        renderMyStatsDisplay();
+        
+        document.getElementById('my-stats-loader').classList.add('hidden');
+        document.getElementById('my-stats-content').classList.remove('hidden');
+        
+    } catch (err) {
+        console.error(err);
+        document.getElementById('my-stats-loader').innerHTML = '<p style="color:var(--danger);"><i class="fas fa-exclamation-triangle"></i> Błąd pobierania danych.</p>';
+    }
+}
+
+window.switchStatsView = function(type) {
+    currentStatsType = type;
+    document.getElementById('btn-stats-skup').classList.toggle('active', type === 'skup');
+    document.getElementById('btn-stats-sprzedaz').classList.toggle('active', type === 'sprzedaz');
+    renderMyStatsDisplay();
+}
+
+window.changeStatsTimeRange = function(range) {
+    currentStatsRange = range;
+    renderMyStatsDisplay();
+}
+
+function renderMyStatsDisplay() {
+    const typeData = myStatsRawData.filter(row => row.employee === currentEmployeeName && row.type === currentStatsType);
+    
+    let periodTotal = 0;
+    let allTimeTotal = 0;
+    let txSet = new Set();
+    let itemCounts = {};
+    let periodItemsQty = 0;
+    
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const startOfYesterday = startOfToday - (24 * 60 * 60 * 1000);
+    const startOf7Days = startOfToday - (6 * 24 * 60 * 60 * 1000);
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+
+    typeData.forEach(row => {
+        allTimeTotal += row.total; 
+        
+        let rowTime = 0;
+        const d = parseDate(row.date);
+        if(d) rowTime = d.getTime();
+
+        let isInRange = false;
+        
+        if (currentStatsRange === 'all') {
+            isInRange = true;
+        } else if (currentStatsRange === 'today') {
+            if (rowTime >= startOfToday) isInRange = true;
+        } else if (currentStatsRange === 'yesterday') {
+            if (rowTime >= startOfYesterday && rowTime < startOfToday) isInRange = true;
+        } else if (currentStatsRange === '7days') {
+            if (rowTime >= startOf7Days) isInRange = true;
+        } else if (currentStatsRange === 'month') {
+            if (rowTime >= startOfMonth) isInRange = true;
+        }
+        
+        if (isInRange) {
+            periodTotal += row.total;
+            periodItemsQty += row.qty;
+            if (row.report_id) txSet.add(row.report_id);
+            if (!itemCounts[row.name]) itemCounts[row.name] = 0;
+            itemCounts[row.name] += row.qty;
+        }
+    });
+
+    let displayPeriodTotal = periodTotal;
+    if (currentStatsRange === 'today' && currentStatsType === 'skup') {
+        let localToday = getDailyStat(currentEmployeeName);
+        displayPeriodTotal = Math.max(periodTotal, localToday); 
+    }
+    
+    let topItem = "Brak";
+    let maxQty = 0;
+    for (const [name, qty] of Object.entries(itemCounts)) {
+        if (qty > maxQty) {
+            maxQty = qty;
+            topItem = name;
+        }
+    }
+
+    let txCount = txSet.size;
+    if (txCount === 0 && displayPeriodTotal > 0) {
+        txCount = Object.keys(itemCounts).length > 0 ? 1 : 0; 
+    }
+
+    let avgTx = txCount > 0 ? Math.round(displayPeriodTotal / txCount) : 0;
+    
+    document.getElementById('ms-today').innerText = displayPeriodTotal + '$';
+    document.getElementById('ms-alltime').innerText = allTimeTotal + '$';
+    document.getElementById('ms-count').innerText = txCount;
+    document.getElementById('ms-avg').innerText = avgTx + '$';
+    document.getElementById('ms-items').innerText = periodItemsQty;
+    
+    if (topItem.length > 15) topItem = topItem.substring(0, 15) + '...';
+    document.getElementById('ms-topitem').innerText = topItem;
+
+    const labelAction = currentStatsType === 'skup' ? 'Skupione' : 'Sprzedane';
+    const labelEl = document.getElementById('ms-label-items');
+    if(labelEl) labelEl.innerText = `${labelAction} sztuki`;
+    
+    const descEl = document.getElementById('my-stats-desc');
+    if (descEl) {
+        descEl.innerText = currentStatsType === 'skup' ? 'Podsumowanie Twojej aktywności w firmie (skup).' : 'Podsumowanie Twojej aktywności w firmie (sprzedaż).';
+    }
+
+    const periodLabelEl = document.getElementById('ms-label-period');
+    if (periodLabelEl) {
+        if (currentStatsRange === 'today') periodLabelEl.innerText = 'Dzisiejszy obrót';
+        else if (currentStatsRange === 'yesterday') periodLabelEl.innerText = 'Wczorajszy obrót';
+        else if (currentStatsRange === '7days') periodLabelEl.innerText = 'Obrót (7 dni)';
+        else if (currentStatsRange === 'month') periodLabelEl.innerText = 'Obrót (Miesiąc)';
+        else periodLabelEl.innerText = 'Obrót (Całkowity)';
+    }
+}
+
+window.closeMyStats = function() {
+    document.getElementById('my-stats-modal').classList.remove('active');
+    document.getElementById('my-stats-loader').innerHTML = `
+        <i class="fas fa-circle-notch fa-spin fa-3x" style="color: var(--accent-color);"></i>
+        <p style="margin-top: 15px; color: var(--text-secondary); font-weight: 600;">Pobieranie danych z bazy...</p>
+    `;
+}
+
+// ==========================================
+// SYSTEM TRANSAKCJI PRACOWNIKA (MODAL)
+// ==========================================
+window.openMyTransactions = async function() {
+    document.getElementById('user-dropdown').classList.remove('active');
+    document.getElementById('my-transactions-modal').classList.add('active');
+    
+    document.getElementById('my-transactions-loader').classList.remove('hidden');
+    document.getElementById('my-transactions-content').classList.add('hidden');
+    
+    try {
+        const response = await fetch(`${REPORTS_API_URL}?action=get_reports&t=${new Date().getTime()}`);
+        const rawData = await response.json();
+        
+        myStatsRawData = rawData.filter(row => row.employee === currentEmployeeName);
+        
+        renderTransactionsList();
+        
+        document.getElementById('my-transactions-loader').classList.add('hidden');
+        document.getElementById('my-transactions-content').classList.remove('hidden');
+    } catch (err) {
+        console.error(err);
+        document.getElementById('my-transactions-loader').innerHTML = '<p style="color:var(--danger);"><i class="fas fa-exclamation-triangle"></i> Błąd pobierania danych.</p>';
+    }
+}
+
+function renderTransactionsList() {
+    const container = document.getElementById('transactions-list-container');
+    container.innerHTML = '';
+    
+    if (!myStatsRawData || myStatsRawData.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 20px;">Brak transakcji w historii.</p>';
+        return;
+    }
+
+    // Grupowanie przedmiotów po report_id
+    const grouped = {};
+    myStatsRawData.forEach(row => {
+        if (!row.report_id) return;
+        if (!grouped[row.report_id]) {
+            grouped[row.report_id] = {
+                date: row.date,
+                total: 0,
+                items: [],
+                type: row.type
+            };
+        }
+        grouped[row.report_id].total += row.total;
+        grouped[row.report_id].items.push(`${row.name} (x${row.qty}) - ${row.total}$`);
+    });
+
+    // Sortowanie od najnowszej do najstarszej transakcji
+    const sortedIds = Object.keys(grouped).reverse(); 
+
+    sortedIds.forEach(id => {
+        const data = grouped[id];
+        const typeIcon = data.type === 'skup' ? '<i class="fas fa-cart-arrow-down text-accent"></i>' : '<i class="fas fa-truck-loading text-success"></i>';
+        
+        const div = document.createElement('div');
+        div.className = 'transaction-item-card';
+        div.innerHTML = `
+            <div class="transaction-header">
+                <span style="font-weight: 800; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">${typeIcon} ID: ${id}</span>
+                <span class="transaction-date" style="font-size: 0.8rem; color: var(--text-secondary);">${data.date}</span>
+            </div>
+            <div class="transaction-body" style="margin: 15px 0;">
+                <div class="transaction-items-list" style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 10px;">
+                    ${data.items.map(item => `<div>- ${item}</div>`).join('')}
+                </div>
+                <div class="transaction-total" style="font-weight: 900; color: var(--success); font-size: 1.1rem;">Suma: ${data.total}$</div>
+            </div>
+            <div class="transaction-actions" style="border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 15px; text-align: right;">
+                <button class="report-error-btn" onclick="openReportModal('${id}')" style="background: rgba(239, 68, 68, 0.15); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.3); padding: 8px 15px; border-radius: 10px; cursor: pointer; font-weight: 700; transition: 0.2s;">
+                    <i class="fas fa-exclamation-circle"></i> Zgłoś pomyłkę
+                </button>
+            </div>
+        `;
+        div.style.background = "rgba(0,0,0,0.3)";
+        div.style.border = "1px solid var(--border-color)";
+        div.style.borderRadius = "14px";
+        div.style.padding = "15px";
+        div.style.marginBottom = "15px";
+        
+        container.appendChild(div);
+    });
+    
+    if(sortedIds.length === 0) {
+         container.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 20px;">Brak zidentyfikowanych transakcji z ID.</p>';
+    }
+}
+
+window.closeMyTransactions = function() {
+    document.getElementById('my-transactions-modal').classList.remove('active');
+    document.getElementById('my-transactions-loader').innerHTML = `
+        <i class="fas fa-circle-notch fa-spin fa-3x" style="color: var(--accent-color);"></i>
+        <p style="margin-top: 15px; color: var(--text-secondary); font-weight: 600;">Pobieranie historii z bazy...</p>
+    `;
+}
+
+window.openReportModal = function(receiptId) {
+    currentReportReceiptId = receiptId;
+    document.getElementById('report-receipt-id').innerText = receiptId;
+    document.getElementById('report-reason-input').value = "";
+    document.getElementById('report-transaction-modal').classList.add('active');
+}
+
+window.closeReportModal = function() {
+    document.getElementById('report-transaction-modal').classList.remove('active');
+    currentReportReceiptId = "";
+}
+
+window.submitTransactionReport = async function() {
+    const reason = document.getElementById('report-reason-input').value.trim();
+    if (!reason) {
+        return showNotice("Podaj powód zgłoszenia!", "warning");
+    }
+
+    const btn = document.getElementById('submit-report-btn');
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Wysyłanie...';
+
+    try {
+        const embedPayload = {
+            content: "<@303630730528030720>", // <-- TUTAJ WPISZ SWOJE ID
+            embeds: [{
+                title: "⚠️ Zgłoszenie pomyłki w transakcji!",
+                color: 15158332, 
+                fields: [
+                    { name: "📋 Numer paragonu:", value: `\`${currentReportReceiptId}\``, inline: true },
+                    { name: "👤 Zgłaszający:", value: `**${currentEmployeeName}**`, inline: true },
+                    { name: "📝 Powód / Opis błędu:", value: reason, inline: false }
+                ],
+                timestamp: new Date().toISOString(),
+                footer: { text: "System EL CARTEL PAWN SHOP" }
+            }]
+        };
+
+        const res = await fetch(DISCORD_WEBHOOK_URL, { 
+            method: "POST", 
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(embedPayload) 
+        });
+
+        if (res.ok) {
+            showNotice("Zgłoszenie pomyłki wysłane na Discord!", "success");
+            closeReportModal();
+        } else {
+            throw new Error("Błąd Discord API");
+        }
+    } catch (e) {
+        showNotice("Błąd wysyłania zgłoszenia!", "danger");
+        console.error(e);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+    }
+}
