@@ -1,7 +1,7 @@
 // ==========================================
 // WERSJA APLIKACJI (Zmień, aby wymusić odświeżenie u wszystkich)
 // ==========================================
-const APP_VERSION = "1.3.6";
+const APP_VERSION = "3.5.0"; // Normalizacja nazw produktów
 
 // ==========================================
 // KONFIGURACJA LINKÓW I CEN
@@ -18,39 +18,51 @@ window.currentGlobalGoal = 0;
 
 // Globalna zmienna przechowująca przetworzone dane dla wyszukiwarki
 window.globalSortedTransactions = [];
+window.currentEmployeesList = []; // Lista pracowników do edycji
+window.globalRawFeed = []; // Globalne logi do profili pracownika
+let currentEmployeeName = "";
+let currentFeedLimit = 50; // LIMIT WYŚWIETLANIA DLA LIVE FEEDA
 
-// SŁOWNIK CEN AWARYJNYCH (KOŁO RATUNKOWE)
-// Używany TYLKO wtedy, gdy towar został sprzedany w wybranym okresie dat, 
-// ale ani razu nie został w tym samym okresie skupiony. Wpisz tu maksymalne ceny skupu.
-const BUY_PRICES = {
-    "Dywan": 240,
-    "Zdobiona książka": 120,
-    "Komputer (laptop)": 585,
-    "Komputer (stacjonarny)": 660,
-    "Konsola": 385,
-    "Konsola DJ": 620,
-    "Kobieca plastikowa figurka": 90,
-    "Plastikowa figurka małpki": 80,
-    "Kwiat": 60,
-    "Gitara elektryczna": 460,
-    "Dziwna substancja": 90,
-    "Dziwna szara substancja": 160,
-    "Biżuteria": 225,
-    "Brudna biżuteria": 140,
-    "Katana": 480,
-    "Mikrofala": 265,
-    "Mikser": 145,
-    "Monitor": 130,
-    "Obraz": 110,
-    "Obraz ścienny": 175,
-    "Głośnik": 132,
-    "Telewizor": 585,
-    "Zegarek": 150,
-    "Złota bransoletka": 200,
-    "Złote kolczyki": 200,
-    "Stary popsuty telefon": 92,
-	"Złota moneta z prezydentem": 100,
+// ==========================================
+// FUNKCJA FORMATOWANIA WALUTY (np. 150000 -> 150 000)
+// ==========================================
+window.formatMoney = function(amount) {
+    if (isNaN(amount)) return "0";
+    return Math.round(amount).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 };
+
+// ==========================================
+// FUNKCJA NORMALIZACJI NAZW (Naprawa wielkości liter)
+// ==========================================
+window.normalizeItemName = function(name) {
+    if (!name) return "Nieznany przedmiot";
+    let trimmed = name.trim();
+    if (trimmed.length === 0) return "Brak nazwy";
+    // Zamienia "zIeloNy PENDRIVE" na "Zielony pendrive"
+    return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
+};
+
+// ==========================================
+// SCROLL NAVBAR LISTENER (Smart Navbar) & SCROLL TO TOP
+// ==========================================
+document.addEventListener('scroll', function() {
+    const navbar = document.querySelector('.navbar');
+    const scrollBtn = document.getElementById('scrollToTopBtn');
+    
+    if (window.scrollY > 50) {
+        navbar.classList.add('scrolled');
+    } else {
+        navbar.classList.remove('scrolled');
+    }
+
+    if (scrollBtn) {
+        if (window.scrollY > 300) {
+            scrollBtn.classList.add('visible');
+        } else {
+            scrollBtn.classList.remove('visible');
+        }
+    }
+});
 
 // ==========================================
 // LOGOWANIE I AUTORYZACJA
@@ -68,18 +80,24 @@ async function loginBoss() {
         const data = await response.json();
         
         if (data.isValid) { 
-            // WERYFIKACJA UPRAWNIEŃ SZEFA
             if (data.role && data.role.toLowerCase().trim() === 'szef') {
-                document.getElementById('logged-boss-name').innerText = data.name.toUpperCase();
+                currentEmployeeName = data.name;
+                document.getElementById('logged-boss-name').innerText = currentEmployeeName.toUpperCase();
                 document.getElementById('login-screen').classList.remove('active');
                 document.getElementById('dashboard-screen').classList.remove('hidden');
+                document.getElementById('user-profile').classList.remove('hidden');
                 showNotice(`Zalogowano pomyślnie jako ${data.name}`, "success");
                 
+                // Od razu wczytujemy też bazę HR do wizytówek
+                fetch(`${PIN_API_URL}?action=get_all`)
+                    .then(res => res.json())
+                    .then(d => { if(d.employees) window.currentEmployeesList = d.employees; })
+                    .catch(() => {});
+
                 loadRealData(); 
             } else {
-                // Jeśli kod PIN jest poprawny, ale pracownik nie ma roli "szef"
                 showNotice("Odmowa! Brak uprawnień zarządcy.", "danger");
-                document.getElementById('boss-pin-input').value = ""; // Czyści błędny PIN z pola
+                document.getElementById('boss-pin-input').value = ""; 
             }
         } else {
             showNotice("Nieprawidłowy PIN!", "danger");
@@ -92,11 +110,62 @@ async function loginBoss() {
     }
 }
 
-function logoutBoss() {
+window.logoutBoss = function() {
+    currentEmployeeName = "";
     document.getElementById('boss-pin-input').value = "";
+    document.getElementById('logged-boss-name').innerText = "---";
     document.getElementById('dashboard-screen').classList.add('hidden');
+    document.getElementById('user-profile').classList.add('hidden');
     document.getElementById('login-screen').classList.add('active');
+    document.getElementById('user-dropdown').classList.remove('active');
 }
+
+window.toggleUserMenu = function() {
+    document.getElementById('user-dropdown').classList.toggle('active');
+}
+
+document.addEventListener('click', function(event) {
+    const profile = document.getElementById('user-profile');
+    const dropdown = document.getElementById('user-dropdown');
+    if (profile && dropdown && !profile.contains(event.target)) {
+        dropdown.classList.remove('active');
+    }
+});
+
+// ==========================================
+// ANIMACJA NABIJANIA LICZNIKA (COUNTUP - GTA HEIST STYLE)
+// ==========================================
+window.animateCountUp = function(element, targetValue, duration = 1500) {
+    let startValue = 0;
+    const isNegative = targetValue < 0;
+    const absTarget = Math.abs(targetValue);
+    
+    let startTimestamp = null;
+    const step = (timestamp) => {
+        if (!startTimestamp) startTimestamp = timestamp;
+        const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+        
+        // easeOutQuart - szybki start, powolne hamowanie na końcu
+        const easeProgress = 1 - Math.pow(1 - progress, 5);
+        const currentVal = Math.floor(easeProgress * absTarget);
+        
+        const displayValue = isNegative ? -currentVal : currentVal;
+        
+        // Zabezpieczenie przed pokazaniem -0
+        if (displayValue === 0 && isNegative) {
+            element.innerText = `0$`;
+        } else {
+            element.innerText = `${window.formatMoney(displayValue)}$`;
+        }
+        
+        if (progress < 1) {
+            window.requestAnimationFrame(step);
+        } else {
+            element.innerText = `${window.formatMoney(targetValue)}$`; 
+        }
+    };
+    window.requestAnimationFrame(step);
+};
 
 // ==========================================
 // ANALIZA I FILTROWANIE DANYCH
@@ -104,36 +173,25 @@ function logoutBoss() {
 
 function parseDate(dateStr) {
     if (!dateStr) return new Date();
-    // Odczyt formatu ISO (z literką T) z arkuszy Google
     if (typeof dateStr === 'string' && dateStr.includes("T")) {
         return new Date(dateStr); 
     }
-    
-    // Obsługa formatu daty z czasem (DD.MM.YYYY HH:mm:ss)
     const parts = String(dateStr).split(" ");
     const dateParts = parts[0].split(".");
-    
-    if (dateParts.length !== 3) {
-        return new Date(dateStr);
-    }
-    
+    if (dateParts.length !== 3) return new Date(dateStr);
     const d = new Date(dateParts[2], dateParts[1] - 1, dateParts[0]);
-    
-    // Jeśli mamy też godzinę, dopisujemy ją do obiektu Date
     if (parts[1]) {
         const timeParts = parts[1].split(":");
         d.setHours(timeParts[0] || 0, timeParts[1] || 0, timeParts[2] || 0, 0);
     } else {
         d.setHours(0, 0, 0, 0);
     }
-    
     return d;
 }
 
 window.applyFilter = function() {
     const btn = document.getElementById('ok-filter-btn');
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-    showNotice("Filtrowanie bazy danych...", "info");
     
     loadRealData().then(() => {
         btn.innerHTML = 'OK';
@@ -144,7 +202,6 @@ window.applyFilter = function() {
 window.refreshPage = function() {
     const icon = document.getElementById('refresh-icon');
     if(icon) icon.classList.add('fa-spin');
-    showNotice("Odświeżanie statystyk...", "info");
     
     loadRealData().then(() => {
         if(icon) icon.classList.remove('fa-spin');
@@ -156,10 +213,42 @@ window.refreshPage = function() {
 }
 
 async function loadRealData() {
+    // ------------------------------------------------------------------
+    // WSTRZYKIWANIE SKELETONÓW PRZED POBRANIEM DANYCH
+    // ------------------------------------------------------------------
+    const kpiSkeleton = '<div class="skeleton" style="height: 30px; width: 60%; margin: 5px 0; border-radius: 6px;"></div>';
+    document.getElementById('total-buy').innerHTML = kpiSkeleton;
+    document.getElementById('total-sell').innerHTML = kpiSkeleton;
+    document.getElementById('total-balance').innerHTML = kpiSkeleton;
+    document.getElementById('total-profit').innerHTML = kpiSkeleton;
+
+    const tableSkeleton = Array(5).fill(`
+        <tr>
+            <td><div class="skeleton" style="height: 16px; width: 80%; border-radius: 4px;"></div></td>
+            <td style="text-align:center;"><div class="skeleton" style="height: 16px; width: 40%; margin: 0 auto; border-radius: 4px;"></div></td>
+            <td style="text-align:right;"><div class="skeleton" style="height: 16px; width: 60%; margin-left: auto; border-radius: 4px;"></div></td>
+        </tr>
+    `).join('');
+    
+    document.getElementById('buy-table-body').innerHTML = tableSkeleton;
+    document.getElementById('sell-table-body').innerHTML = tableSkeleton;
+    document.getElementById('ranking-buy-table-body').innerHTML = tableSkeleton;
+    document.getElementById('ranking-sell-table-body').innerHTML = tableSkeleton;
+
+    const feedSkeleton = Array(5).fill(`
+        <div class="feed-item" style="padding: 18px 30px; display: flex; align-items: center; gap: 15px;">
+            <div class="skeleton" style="width: 80px; height: 22px; border-radius: 6px;"></div>
+            <div class="skeleton" style="width: 130px; height: 16px; border-radius: 4px;"></div>
+            <div class="skeleton" style="width: 95px; height: 16px; border-radius: 4px;"></div>
+            <div class="skeleton" style="flex-grow: 1; height: 16px; border-radius: 4px;"></div>
+            <div class="skeleton" style="width: 80px; height: 20px; border-radius: 4px;"></div>
+        </div>
+    `).join('');
+    document.getElementById('activity-feed-container').innerHTML = feedSkeleton;
+    // ------------------------------------------------------------------
+
     const dateFromValue = document.getElementById('filter-date-from').value;
     const dateToValue = document.getElementById('filter-date-to').value;
-    
-    // Zczytujemy wartość z nowego filtra pracowników
     const empSelect = document.getElementById('filter-employee');
     const empFilterValue = empSelect ? empSelect.value : "ALL";
 
@@ -179,23 +268,33 @@ async function loadRealData() {
     }
 
     try {
-        const response = await fetch(`${REPORTS_API_URL}?action=get_reports`);
-        const data = await response.json();
+        const response = await fetch(`${REPORTS_API_URL}?action=get_reports&t=${new Date().getTime()}`);
+        let rawData = await response.json();
         
-        // POBIERANIE GLOBALNEGO CELU Z GOOGLE SHEETS
+        // NORMALIZACJA NAZW PRZEDMIOTÓW (likwidacja literówek i wielkich liter)
+        rawData.forEach(row => {
+            if (row.name) {
+                row.name = window.normalizeItemName(row.name);
+            }
+        });
+        
+        // Zapis globalny do wyliczania statystyk pracownika na kliknięcie
+        window.globalRawFeed = rawData;
+        
+        // Filtrujemy tylko to co związane z kasą (skup i sprzedaż)
+        const data = rawData.filter(row => row.type === "skup" || row.type === "sprzedaz");
+        
         try {
-            const goalResponse = await fetch(`${REPORTS_API_URL}?action=get_goal`);
+            const goalResponse = await fetch(`${REPORTS_API_URL}?action=get_goal&t=${new Date().getTime()}`);
             const goalData = await goalResponse.json();
             if (goalData && goalData.goal !== undefined) {
                 window.currentGlobalGoal = parseFloat(goalData.goal) || 0;
                 document.getElementById('goal-amount-input').value = window.currentGlobalGoal;
             }
         } catch(e) {
-            console.error("Błąd pobierania celu:", e);
             window.currentGlobalGoal = 0;
         }
 
-        // Zbieranie wszystkich unikalnych pracowników do dropdowna (z całej bazy)
         const allEmployees = new Set();
         data.forEach(row => {
             if (row.employee && row.employee.trim() !== "") {
@@ -203,7 +302,6 @@ async function loadRealData() {
             }
         });
         
-        // Aktualizowanie dropdowna (z zachowaniem zaznaczenia)
         if (empSelect) {
             empSelect.innerHTML = '<option value="ALL">Wszyscy pracownicy</option>';
             Array.from(allEmployees).sort().forEach(emp => {
@@ -221,19 +319,13 @@ async function loadRealData() {
         
         const groupedBuy = {};
         const groupedSell = {};
-
         const rankingBuy = {};
         const rankingSell = {};
-        
         const rawFeed = [];
         const dailyData = {}; 
-        
         const dynamicBuyStats = {};
-        
-        // TABLICA DLA GODZIN SZCZYTU (24 godziny)
         const hourlyData = new Array(24).fill(0);
 
-        // PIERWSZA PĘTLA: Zbieramy dane TYLKO ze skupu do ustalenia realnych kosztów (Dla całej firmy)
         data.forEach(row => {
             const rowDate = parseDate(row.date);
             const rowTS = rowDate.getTime();
@@ -250,7 +342,6 @@ async function loadRealData() {
             }
         });
 
-        // DRUGA PĘTLA: Główne obliczenia (Z uwzględnieniem filtra pracownika!)
         data.forEach(row => {
             const rowDate = parseDate(row.date);
             const rowTS = rowDate.getTime();
@@ -260,20 +351,16 @@ async function loadRealData() {
 
             const empName = row.employee || "Nieznany";
             
-            // JEŚLI JEST WYBRANY PRACOWNIK - ODRZUCAMY RESZTĘ
             if (empFilterValue !== "ALL" && empName !== empFilterValue) return;
 
-            // DODAJEMY DO LIVE FEED
             rawFeed.push(row);
             
-            // ZLICZANIE DO GODZIN SZCZYTU (TYLKO JEŚLI DATA ZAWIERA CZAS)
             const dateStrStr = String(row.date);
             if (dateStrStr.includes('T') || dateStrStr.includes(':')) {
                 const hour = rowDate.getHours();
                 hourlyData[hour]++;
             }
 
-            // PRZYGOTOWANIE DANYCH DO WYKRESU LINIOWEGO
             const dayString = rowDate.toLocaleDateString('pl-PL');
             if (!dailyData[dayString]) {
                 dailyData[dayString] = { dateStr: dayString, timestamp: rowTS, buy: 0, sell: 0 };
@@ -287,10 +374,7 @@ async function loadRealData() {
                 groupedBuy[row.name].qty += row.qty;
                 groupedBuy[row.name].total += row.total;
 
-                // Do rankingu skupu dodajemy całkowitą wydaną kwotę
-                if (!rankingBuy[empName]) {
-                    rankingBuy[empName] = { name: empName, totalBuyVal: 0 };
-                }
+                if (!rankingBuy[empName]) rankingBuy[empName] = { name: empName, totalBuyVal: 0 };
                 rankingBuy[empName].totalBuyVal += row.total;
 
             } else if (row.type === "sprzedaz") {
@@ -299,11 +383,8 @@ async function loadRealData() {
                 
                 let itemCost = 0;
                 
-                // Używamy globalnych statystyk zakupu firmy do wyliczenia marży, żeby nie oszukiwać na zysku pracownika
                 if (dynamicBuyStats[row.name] && dynamicBuyStats[row.name].qty > 0) {
                     itemCost = dynamicBuyStats[row.name].total / dynamicBuyStats[row.name].qty;
-                } else if (BUY_PRICES[row.name] !== undefined) {
-                    itemCost = BUY_PRICES[row.name];
                 } else {
                     itemCost = (row.total / row.qty) * 0.8;
                 }
@@ -315,29 +396,25 @@ async function loadRealData() {
                 groupedSell[row.name].qty += row.qty;
                 groupedSell[row.name].total += row.total;
                 
-                // Do rankingu sprzedaży dodajemy całkowity zysk pracownika 
-                if (!rankingSell[empName]) {
-                    rankingSell[empName] = { name: empName, totalSellVal: 0 };
-                }
+                if (!rankingSell[empName]) rankingSell[empName] = { name: empName, totalSellVal: 0 };
                 rankingSell[empName].totalSellVal += row.total;
             }
         });
 
-        // AKTUALIZACJA WIDOKU KPI
-        document.getElementById('total-buy').innerText = `${totalBuy}$`;
-        document.getElementById('total-sell').innerText = `${totalSell}$`;
+        animateCountUp(document.getElementById('total-buy'), totalBuy);
+        animateCountUp(document.getElementById('total-sell'), totalSell);
         
         let balance = totalSell - totalBuy;
-        document.getElementById('total-balance').innerText = `${balance}$`;
-        document.getElementById('total-balance').style.color = balance >= 0 ? 'var(--success)' : 'var(--danger)';
+        const balEl = document.getElementById('total-balance');
+        balEl.style.color = balance >= 0 ? 'var(--success)' : 'var(--danger)';
+        animateCountUp(balEl, balance);
         
-        document.getElementById('total-profit').innerText = `${Math.round(totalProfit)}$`;
-        document.getElementById('total-profit').style.color = totalProfit >= 0 ? 'var(--warning)' : 'var(--danger)';
+        const profEl = document.getElementById('total-profit');
+        profEl.style.color = totalProfit >= 0 ? 'var(--warning)' : 'var(--danger)';
+        animateCountUp(profEl, Math.round(totalProfit));
 
-        // AKTUALIZACJA CELU TYGODNIOWEGO Z UWZGLĘDNIENIEM SERWERA
         updateGoalProgress(totalSell);
 
-        // RENDEROWANIE TABEL
         const renderRows = (tableId, arr, isExpense) => {
             const tbody = document.getElementById(tableId);
             const items = Object.values(arr).sort((a,b) => b.total - a.total);
@@ -352,7 +429,7 @@ async function loadRealData() {
                     <td>${item.name}</td>
                     <td style="text-align: center;"><span class="qty-badge">x${item.qty}</span></td>
                     <td style="text-align: right;" class="price-val" style="color: ${isExpense ? 'var(--danger)' : 'var(--success)'}">
-                        ${isExpense ? '-' : '+'}${item.total}$
+                        ${isExpense ? '-' : '+'}${window.formatMoney(item.total)}$
                     </td>
                 </tr>
             `).join('');
@@ -361,7 +438,6 @@ async function loadRealData() {
         renderRows('buy-table-body', groupedBuy, true);
         renderRows('sell-table-body', groupedSell, false);
         
-        // RENDEROWANIE RANKINGU SKUPU
         const renderBuyRanking = () => {
             const tbody = document.getElementById('ranking-buy-table-body');
             const rankingItems = Object.values(rankingBuy).sort((a,b) => b.totalBuyVal - a.totalBuyVal);
@@ -371,19 +447,17 @@ async function loadRealData() {
                 return;
             }
             
-            tbody.innerHTML = rankingItems
-                .map((item, index) => `
+            tbody.innerHTML = rankingItems.map((item, index) => `
                 <tr>
                     <td style="width: 80px;"><span class="rank-badge">#${index + 1}</span></td>
-                    <td><strong>${item.name}</strong></td>
+                    <td onclick="window.openEmployeeProfile('${item.name}')" title="Kliknij, aby zobaczyć profil"><strong class="clickable-emp"><i class="fas fa-user-circle"></i> ${item.name}</strong></td>
                     <td style="text-align: right; color: var(--accent-color); font-weight: 800;">
-                        ${item.totalBuyVal}$
+                        ${window.formatMoney(item.totalBuyVal)}$
                     </td>
                 </tr>
             `).join('');
         };
 
-        // RENDEROWANIE RANKINGU SPRZEDAŻY
         const renderSellRanking = () => {
             const tbody = document.getElementById('ranking-sell-table-body');
             const rankingItems = Object.values(rankingSell).sort((a,b) => b.totalSellVal - a.totalSellVal);
@@ -393,13 +467,12 @@ async function loadRealData() {
                 return;
             }
             
-            tbody.innerHTML = rankingItems
-                .map((item, index) => `
+            tbody.innerHTML = rankingItems.map((item, index) => `
                 <tr>
                     <td style="width: 80px;"><span class="rank-badge">#${index + 1}</span></td>
-                    <td><strong>${item.name}</strong></td>
+                    <td onclick="window.openEmployeeProfile('${item.name}')" title="Kliknij, aby zobaczyć profil"><strong class="clickable-emp"><i class="fas fa-user-circle"></i> ${item.name}</strong></td>
                     <td style="text-align: right; color: var(--success); font-weight: 800;">
-                        +${item.totalSellVal}$
+                        +${window.formatMoney(item.totalSellVal)}$
                     </td>
                 </tr>
             `).join('');
@@ -408,9 +481,6 @@ async function loadRealData() {
         renderBuyRanking();
         renderSellRanking();
 
-        // ==========================================
-        // PRZYGOTOWANIE DANYCH DO LIVE FEED (Wyszukiwarka)
-        // ==========================================
         const prepareLiveFeed = () => {
             const groupedTransactions = {};
             
@@ -440,23 +510,22 @@ async function loadRealData() {
                 return b.sortIndex - a.sortIndex; 
             });
 
+            currentFeedLimit = 50; 
             window.renderLiveFeed();
         };
 
         prepareLiveFeed();
-        
-        // RENDEROWANIE WYKRESÓW
         renderCharts(groupedSell, dailyData, hourlyData);
-
         document.getElementById('report-timestamp').innerText = `Ostatnia aktualizacja: ${new Date().toLocaleTimeString()}`;
 
     } catch (err) {
         console.error("Błąd bazy danych:", err);
-        throw err; 
     }
 }
 
-// Globalna funkcja renderowania transakcji uwzględniająca wyszukiwarkę
+// ------------------------------------------
+// LIVE FEED RENDER Z LIMITOWANIEM
+// ------------------------------------------
 window.renderLiveFeed = function() {
     const container = document.getElementById('activity-feed-container');
     if (!container) return;
@@ -481,11 +550,14 @@ window.renderLiveFeed = function() {
         return;
     }
 
-    container.innerHTML = filtered.map((tx) => {
+    const itemsToRender = filtered.slice(0, currentFeedLimit);
+
+    let html = itemsToRender.map((tx) => {
         const isBuy = tx.type === "skup";
         const actionClass = isBuy ? "buy" : "sell";
         const actionText = isBuy ? "Skup" : "Sprzedaż";
         const sign = isBuy ? "-" : "+";
+        const empNameSafe = tx.employee || "Nieznany";
         
         let displayDate = tx.date;
         if (typeof displayDate === 'string' && displayDate.includes('T')) {
@@ -497,11 +569,11 @@ window.renderLiveFeed = function() {
             <div class="feed-item" onclick="this.classList.toggle('active-feed')">
                 <div class="feed-item-summary">
                     <span class="feed-id-badge">#${tx.id}</span>
-                    <span class="feed-emp">${tx.employee || "Nieznany"}</span>
+                    <span class="feed-emp clickable-emp" title="Pokaż profil" onclick="event.stopPropagation(); window.openEmployeeProfile('${empNameSafe}')"><i class="fas fa-user-circle"></i> ${empNameSafe}</span>
                     <span class="feed-action ${actionClass}">${actionText}</span>
                     <span class="feed-item-main-info">Transakcja (${tx.items.length} przedmiotów)</span>
                     <span class="feed-item-value ${actionClass}" style="color: ${isBuy ? 'var(--danger)' : 'var(--success)'}">
-                        ${sign}${tx.totalAmount}$
+                        ${sign}${window.formatMoney(tx.totalAmount)}$
                     </span>
                     <i class="fas fa-chevron-down feed-chevron"></i>
                 </div>
@@ -523,7 +595,7 @@ window.renderLiveFeed = function() {
                                 <tr>
                                     <td>${i.name}</td>
                                     <td style="text-align:center;">x${i.qty}</td>
-                                    <td style="text-align:right;">${i.total}$</td>
+                                    <td style="text-align:right;">${window.formatMoney(i.total)}$</td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -532,23 +604,36 @@ window.renderLiveFeed = function() {
             </div>
         `;
     }).join('');
+
+    if (filtered.length > currentFeedLimit) {
+        const remaining = filtered.length - currentFeedLimit;
+        html += `
+            <div style="padding: 15px; border-top: 1px solid rgba(255, 255, 255, 0.05);">
+                <button onclick="loadMoreFeed()" class="load-more-btn">
+                    <i class="fas fa-chevron-down"></i> Pokaż starsze operacje (ukryte: ${remaining})
+                </button>
+            </div>
+        `;
+    }
+
+    container.innerHTML = html;
 };
 
-// ==========================================
-// FUNKCJE CELU TYGODNIOWEGO
-// ==========================================
+window.loadMoreFeed = function() {
+    currentFeedLimit += 50;
+    window.renderLiveFeed();
+};
+
 window.updateGoalValue = function(val) {
     const goal = parseFloat(val) || 0;
     window.currentGlobalGoal = goal;
     
-    // Zapisujemy nowy cel do Google Sheets
     fetch(REPORTS_API_URL, {
         method: "POST",
         body: JSON.stringify({ action: "set_goal", goal: goal })
     }).catch(e => console.error("Błąd zapisu celu do chmury:", e));
     
-    // Pobieramy aktualną sumę sprzedaży z karty KPI
-    const currentSell = parseFloat(document.getElementById('total-sell').innerText.replace('$', '')) || 0;
+    const currentSell = parseFloat(document.getElementById('total-sell').innerText.replace(/\s|\$/g, '')) || 0;
     updateGoalProgress(currentSell);
     showNotice("Cel został zaktualizowany!", "info");
 }
@@ -561,17 +646,16 @@ function updateGoalProgress(currentSell) {
 
     if (goal <= 0) {
         fill.style.width = "0%";
-        statusText.innerText = `Realizacja: ${currentSell}$ / Cel nieustawiony`;
+        statusText.innerText = `Realizacja: ${window.formatMoney(currentSell)}$ / Cel nieustawiony`;
         pctText.innerText = "0%";
         return;
     }
 
     const percentage = Math.min(Math.round((currentSell / goal) * 100), 100);
     fill.style.width = percentage + "%";
-    statusText.innerText = `Realizacja: ${currentSell}$ / ${goal}$`;
+    statusText.innerText = `Realizacja: ${window.formatMoney(currentSell)}$ / ${window.formatMoney(goal)}$`;
     pctText.innerText = percentage + "%";
 
-    // Zmiana kolorów paska w zależności od sukcesu
     if (percentage >= 100) {
         fill.style.background = "linear-gradient(90deg, #22c55e, #10b981)";
         fill.style.boxShadow = "0 0 20px rgba(34, 197, 94, 0.5)";
@@ -581,9 +665,6 @@ function updateGoalProgress(currentSell) {
     }
 }
 
-// ==========================================
-// FUNKCJA RYSUJĄCA WYKRESY (CHART.JS)
-// ==========================================
 function renderCharts(groupedSell, dailyData, hourlyData) {
     Chart.defaults.color = '#94a3b8';
     Chart.defaults.borderColor = 'rgba(255, 255, 255, 0.05)';
@@ -614,12 +695,8 @@ function renderCharts(groupedSell, dailyData, hourlyData) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false }
-            },
-            scales: {
-                y: { beginAtZero: true }
-            }
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true } }
         }
     });
 
@@ -652,35 +729,28 @@ function renderCharts(groupedSell, dailyData, hourlyData) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            interaction: {
-                mode: 'index',
-                intersect: false,
-            },
+            interaction: { mode: 'index', intersect: false },
             plugins: {
                 tooltip: {
                     callbacks: {
                         label: function(context) {
                             let label = context.dataset.label || '';
                             if (label) label += ': ';
-                            if (context.parsed.y !== null) label += context.parsed.y + '$';
+                            if (context.parsed.y !== null) label += window.formatMoney(context.parsed.y) + '$';
                             return label;
                         }
                     }
                 }
             },
-            scales: {
-                y: { beginAtZero: true }
-            }
+            scales: { y: { beginAtZero: true } }
         }
     });
 
-    // NOWE: HEATMAPA (WYKRES SŁUPKOWY GODZIN)
-    // Dynamiczne kolory (im więcej transakcji, tym bardziej intensywny kolor)
     const maxTransactions = Math.max(...hourlyData) || 1;
     const dynamicColors = hourlyData.map(val => {
         if(val === 0) return 'rgba(255, 255, 255, 0.05)';
-        const intensity = 0.3 + (0.7 * (val / maxTransactions)); // Od 0.3 do 1.0
-        return `rgba(245, 158, 11, ${intensity})`; // Kolor warning (--warning z CSS)
+        const intensity = 0.3 + (0.7 * (val / maxTransactions));
+        return `rgba(245, 158, 11, ${intensity})`; 
     });
 
     const ctxPeak = document.getElementById('peakHoursChart').getContext('2d');
@@ -700,24 +770,17 @@ function renderCharts(groupedSell, dailyData, hourlyData) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false }
-            },
+            plugins: { legend: { display: false } },
             scales: {
-                x: {
-                    ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12 }
-                },
-                y: {
-                    beginAtZero: true,
-                    ticks: { stepSize: 1 }
-                }
+                x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12 } },
+                y: { beginAtZero: true, ticks: { stepSize: 1 } }
             }
         }
     });
 }
 
 // ==========================================
-// ZARZĄDZANIE PRACOWNIKAMI (NOWY MODUŁ)
+// ZARZĄDZANIE PRACOWNIKAMI I PROFILE
 // ==========================================
 
 window.openEmployeeManager = async function() {
@@ -731,23 +794,46 @@ window.closeEmployeeManager = function() {
 
 async function loadEmployeesToTable() {
     const tbody = document.getElementById('emp-manager-table-body');
-    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;"><i class="fas fa-spinner fa-spin"></i> Pobieranie danych z bazy...</td></tr>';
+    
+    const empSkeletonHTML = Array(4).fill(`
+        <tr>
+            <td><div class="skeleton" style="height: 16px; width: 120px; border-radius: 4px;"></div></td>
+            <td style="text-align:center;"><div class="skeleton" style="height: 22px; width: 80px; margin: 0 auto; border-radius: 6px;"></div></td>
+            <td style="text-align:center;"><div class="skeleton" style="height: 20px; width: 40px; margin: 0 auto; border-radius: 6px;"></div></td>
+            <td style="text-align:right;">
+                <div style="display: flex; justify-content: flex-end; gap: 5px;">
+                    <div class="skeleton" style="width: 34px; height: 34px; border-radius: 8px;"></div>
+                    <div class="skeleton" style="width: 34px; height: 34px; border-radius: 8px;"></div>
+                    <div class="skeleton" style="width: 34px; height: 34px; border-radius: 8px;"></div>
+                </div>
+            </td>
+        </tr>
+    `).join('');
+    tbody.innerHTML = empSkeletonHTML;
     
     try {
         const response = await fetch(`${PIN_API_URL}?action=get_all`);
         const data = await response.json();
         
         if (data.employees && data.employees.length > 0) {
+            window.currentEmployeesList = data.employees; 
+
             tbody.innerHTML = data.employees.map(emp => {
                 const isBoss = emp.role && emp.role.toLowerCase() === 'szef';
+                const rankDisplay = emp.rank ? emp.rank : "Pracownik";
                 return `
                     <tr>
-                        <td><strong>${emp.name}</strong></td>
-                        <td style="text-align: center; color: var(--warning); letter-spacing: 5px;">****</td>
+                        <td onclick="window.openEmployeeProfile('${emp.name}')" title="Kliknij, aby zobaczyć profil"><strong class="clickable-emp"><i class="fas fa-user-circle"></i> ${emp.name}</strong></td>
+                        <td style="text-align: center;">
+                            <span class="emp-rank-badge">${rankDisplay}</span>
+                        </td>
                         <td style="text-align: center;">
                             ${isBoss ? '<span class="is-boss-badge">Tak</span>' : '<span class="no-access-badge">Nie</span>'}
                         </td>
                         <td style="text-align: right;">
+                            <button onclick="openEditEmployee('${emp.pin}')" class="emp-action-btn" style="color: var(--accent-color); border-color: rgba(56, 189, 248, 0.3);" title="Edytuj dane">
+                                <i class="fas fa-pencil-alt"></i>
+                            </button>
                             <button onclick="toggleEmployeeRole('${emp.pin}', '${isBoss ? '' : 'szef'}')" class="emp-action-btn emp-btn-role" title="Zmień uprawnienia">
                                 <i class="fas fa-user-shield"></i>
                             </button>
@@ -759,6 +845,7 @@ async function loadEmployeesToTable() {
                 `;
             }).join('');
         } else {
+            window.currentEmployeesList = [];
             tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">Brak zapisanych pracowników w bazie.</td></tr>';
         }
     } catch (err) {
@@ -766,14 +853,268 @@ async function loadEmployeesToTable() {
     }
 }
 
+// ------------------------------------------
+// PROFIL PRACOWNIKA (WIZYTÓWKA) - ZAAWANSOWANA ANALIZA
+// ------------------------------------------
+window.openEmployeeProfile = function(name) {
+    if(!name || name === "Nieznany") return;
+    
+    // Zabezpieczenie: jeśli modal nie istnieje na stronie w momencie kliknięcia, dodaj go
+    if (!document.getElementById('employee-profile-modal')) {
+        const profileModalHTML = `
+            <div id="employee-profile-modal" class="emp-modal-overlay hidden">
+                <div class="emp-modal-content" style="max-width: 550px;">
+                    <div class="emp-modal-header">
+                        <h2><i class="fas fa-id-badge"></i> Akta pracownika</h2>
+                        <button class="emp-close-btn" onclick="window.closeEmployeeProfile()"><i class="fas fa-times"></i></button>
+                    </div>
+                    <div class="emp-modal-body" id="emp-profile-body">
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', profileModalHTML);
+    }
+
+    let tBuy = 0;
+    let tSell = 0;
+    let ops = 0;
+    let maxDeal = 0;
+    let itemCounts = {};
+    let activeDays = new Set();
+    let firstFound = false;
+    let lastActive = "Brak aktywności";
+    
+    const feed = window.globalSortedTransactions || [];
+    
+    feed.forEach(tx => {
+        if (tx.employee === name) {
+            ops++;
+            activeDays.add(parseDate(tx.date).toLocaleDateString());
+            
+            // Ostatnia aktywność
+            if (!firstFound) {
+                let dDate = tx.date;
+                if (typeof dDate === 'string' && dDate.includes('T')) {
+                    dDate = new Date(dDate).toLocaleString('pl-PL');
+                }
+                lastActive = dDate;
+                firstFound = true;
+            }
+
+            if (tx.type === 'skup') tBuy += tx.totalAmount;
+            if (tx.type === 'sprzedaz') tSell += tx.totalAmount;
+            
+            if (tx.totalAmount > maxDeal) maxDeal = tx.totalAmount;
+            
+            tx.items.forEach(i => {
+                itemCounts[i.name] = (itemCounts[i.name] || 0) + i.qty;
+            });
+        }
+    });
+
+    const favItem = Object.entries(itemCounts)
+        .sort((a,b) => b[1] - a[1])[0] || ["Brak", 0];
+
+    const empData = window.currentEmployeesList.find(e => e.name === name) || {};
+    const rank = empData.rank || "Pracownik";
+    const ssn = empData.ssn || "Brak danych";
+    const pluses = empData.pluses || 0;
+    const minuses = empData.minuses || 0;
+    
+    const totalVolume = tBuy + tSell;
+    const avgOpsPerDay = activeDays.size > 0 ? (ops / activeDays.size).toFixed(1) : 0;
+
+    const body = document.getElementById('emp-profile-body');
+    if (body) {
+        body.innerHTML = `
+            <div class="profile-header-info">
+                <div class="profile-avatar">${name.charAt(0).toUpperCase()}</div>
+                <div class="profile-details">
+                    <h3>${name}</h3>
+                    <div style="display:flex; gap:10px; font-size:0.85rem; flex-wrap:wrap;">
+                        <span class="emp-rank-badge">${rank}</span>
+                        <span class="qty-badge" style="color:var(--text-secondary); border:1px dashed rgba(255,255,255,0.2);">SSN: ${ssn}</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="profile-stats">
+                <div class="p-stat-box">
+                    <div style="font-size:0.75rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:1px; margin-bottom:5px;">Suma Obrotu</div>
+                    <div class="p-stat-val" style="color:var(--accent-color)">${window.formatMoney(totalVolume)}$</div>
+                </div>
+                <div class="p-stat-box">
+                    <div style="font-size:0.75rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:1px; margin-bottom:5px;">Operacji łącznie</div>
+                    <div class="p-stat-val" style="color:white">${ops}</div>
+                </div>
+            </div>
+
+            <div class="profile-insights">
+                <div class="insight-row">
+                    <span class="insight-label">Efektywność (śr. operacji/dzień)</span>
+                    <span class="insight-value" style="color:var(--success);">${avgOpsPerDay}</span>
+                </div>
+                <div class="insight-row">
+                    <span class="insight-label">Ostatnio widziany</span>
+                    <span class="insight-value" style="color:var(--accent-color);">${lastActive}</span>
+                </div>
+                <div class="insight-row">
+                    <span class="insight-label">Specjalizacja</span>
+                    <span class="insight-value" style="color:var(--warning);">${favItem[0]} (${favItem[1]} szt.)</span>
+                </div>
+                <div class="insight-row">
+                    <span class="insight-label">Rekordowy pojedynczy deal</span>
+                    <span class="insight-value"><i class="fas fa-dollar-sign"></i> ${window.formatMoney(maxDeal)}</span>
+                </div>
+                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.05);">
+                    <div style="display:flex; justify-content:space-between; font-size:0.8rem; font-weight:800; color:var(--text-secondary); text-transform:uppercase;">
+                        <span>Wkład w aktywność firmy</span>
+                        <span>${ops > 10 ? 'Aktywny' : 'Początkujący'}</span>
+                    </div>
+                    <div class="trust-bar-container">
+                        <div class="trust-bar-fill" style="width: ${Math.min(ops * 2, 100)}%;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="reputation-box">
+                <div class="rep-item">
+                    <span class="rep-title">Pochwały</span>
+                    <span class="rep-score plus" id="prof-plus-val">${pluses}</span>
+                </div>
+                <div class="rep-actions">
+                    <button class="rep-btn add" onclick="window.updateReputation('${name}', 'plus')" title="Dodaj plusa"><i class="fas fa-plus"></i></button>
+                    <button class="rep-btn sub" onclick="window.updateReputation('${name}', 'minus')" title="Dodaj minusa"><i class="fas fa-minus"></i></button>
+                </div>
+                <div class="rep-item">
+                    <span class="rep-title">Kary</span>
+                    <span class="rep-score minus" id="prof-minus-val">${minuses}</span>
+                </div>
+            </div>
+        `;
+    }
+    
+    const modal = document.getElementById('employee-profile-modal');
+    if (modal) modal.classList.remove('hidden');
+}
+
+window.closeEmployeeProfile = function() {
+    const modal = document.getElementById('employee-profile-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+window.updateReputation = async function(name, type) {
+    const pVal = document.getElementById('prof-plus-val');
+    const mVal = document.getElementById('prof-minus-val');
+    
+    // Wizualna aktualizacja natychmiastowa (dla wygody i odczucia prędkości)
+    if(type === 'plus') pVal.innerText = parseInt(pVal.innerText) + 1;
+    else mVal.innerText = parseInt(mVal.innerText) + 1;
+
+    try {
+        const res = await fetch(PIN_API_URL, {
+            method: 'POST',
+            body: JSON.stringify({ action: 'update_reputation', name: name, type: type })
+        });
+        const data = await res.json();
+        
+        if (data.success) {
+            showNotice(type === 'plus' ? "Dodano pochwałę do bazy głównej!" : "Zapisano karę w bazie głównej!", type === 'plus' ? "success" : "danger");
+            
+            // Aktualizacja pamięci podręcznej przeglądarki
+            const emp = window.currentEmployeesList.find(e => e.name === name);
+            if(emp) {
+                emp.pluses = data.pluses;
+                emp.minuses = data.minuses;
+            }
+            
+            // Poprawka wizualna na 100% z bazy (gdyby ktoś np. kliknął 2 razy szybko)
+            pVal.innerText = data.pluses;
+            mVal.innerText = data.minuses;
+        } else {
+            // Cofnięcie zmiany w przypadku błędu
+            if(type === 'plus') pVal.innerText = parseInt(pVal.innerText) - 1;
+            else mVal.innerText = parseInt(mVal.innerText) - 1;
+            showNotice("Błąd zapisu w bazie danych!", "danger");
+        }
+    } catch (e) {
+        // Cofnięcie zmiany w przypadku błędu połączenia
+        if(type === 'plus') pVal.innerText = parseInt(pVal.innerText) - 1;
+        else mVal.innerText = parseInt(mVal.innerText) - 1;
+        showNotice("Błąd połączenia z serwerem!", "danger");
+    }
+}
+
+// ------------------------------------------
+// EDYCJA DANYCH PRACOWNIKA (MODAL)
+// ------------------------------------------
+window.openEditEmployee = function(pin) {
+    const emp = window.currentEmployeesList.find(e => e.pin === pin);
+    if (!emp) return showNotice("Błąd: Nie znaleziono pracownika!", "danger");
+
+    document.getElementById('edit-emp-pin').value = emp.pin;
+    document.getElementById('edit-emp-name').value = emp.name;
+    document.getElementById('edit-emp-rank').value = emp.rank || "Pracownik";
+    document.getElementById('edit-emp-ssn').value = emp.ssn || "";
+    document.getElementById('edit-emp-photo').value = emp.photo || "";
+
+    document.getElementById('edit-employee-modal').classList.remove('hidden');
+}
+
+window.closeEditEmployee = function() {
+    document.getElementById('edit-employee-modal').classList.add('hidden');
+}
+
+window.saveEmployeeEdit = async function() {
+    const btn = document.getElementById('save-edit-emp-btn');
+    const pin = document.getElementById('edit-emp-pin').value;
+    const rank = document.getElementById('edit-emp-rank').value;
+    const ssn = document.getElementById('edit-emp-ssn').value;
+    const photo = document.getElementById('edit-emp-photo').value;
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Zapisywanie...';
+
+    try {
+        const res = await fetch(PIN_API_URL, {
+            method: 'POST',
+            body: JSON.stringify({ 
+                action: 'edit_employee', 
+                pin: pin, 
+                rank: rank, 
+                ssn: ssn, 
+                photo: photo 
+            })
+        });
+        const data = await res.json();
+        
+        if (data.success) {
+            showNotice("Dane pracownika zostały zaktualizowane!", "success");
+            closeEditEmployee();
+            await loadEmployeesToTable();
+        } else {
+            showNotice("Błąd zapisywania danych!", "danger");
+        }
+    } catch (e) {
+        showNotice("Błąd połączenia z serwerem!", "danger");
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-save"></i> Zapisz zmiany';
+    }
+}
+// ------------------------------------------
+
 window.addNewEmployee = async function() {
     const btn = document.getElementById('add-emp-btn');
     const nameInput = document.getElementById('new-emp-name');
     const pinInput = document.getElementById('new-emp-pin');
+    const rankInput = document.getElementById('new-emp-rank'); 
     const isBoss = document.getElementById('new-emp-boss').checked;
     
     const name = nameInput.value.trim();
     const pin = pinInput.value.trim();
+    const rank = rankInput ? rankInput.value : "Pracownik";
     
     if (!name || !pin) return showNotice("Uzupełnij nick i PIN!", "danger");
     if (pin.length < 4) return showNotice("PIN musi mieć minimum 4 znaki!", "warning");
@@ -784,11 +1125,12 @@ window.addNewEmployee = async function() {
     try {
         const res = await fetch(PIN_API_URL, {
             method: 'POST',
-            body: JSON.stringify({
-                action: 'add',
-                name: name,
-                pin: pin,
-                role: isBoss ? 'szef' : ''
+            body: JSON.stringify({ 
+                action: 'add', 
+                name: name, 
+                pin: pin, 
+                role: isBoss ? 'szef' : '',
+                rank: rank  
             })
         });
         
@@ -798,7 +1140,7 @@ window.addNewEmployee = async function() {
         nameInput.value = '';
         pinInput.value = '';
         document.getElementById('new-emp-boss').checked = false;
-        
+        if(rankInput) rankInput.value = "Pracownik"; 
     } catch (e) {
         showNotice("Nie udało się zapisać pracownika!", "danger");
     } finally {
@@ -809,43 +1151,34 @@ window.addNewEmployee = async function() {
 
 window.deleteEmployee = async function(pin, name) {
     if (!confirm(`Na pewno chcesz usunąć pracownika: ${name}?`)) return;
-    
     try {
         showNotice("Usuwanie pracownika...", "info");
-        await fetch(PIN_API_URL, {
-            method: 'POST',
-            body: JSON.stringify({ action: 'delete', pin: pin })
-        });
+        await fetch(PIN_API_URL, { method: 'POST', body: JSON.stringify({ action: 'delete', pin: pin }) });
         await loadEmployeesToTable();
         showNotice("Pracownik usunięty!", "warning");
-    } catch (e) {
-        showNotice("Błąd usuwania!", "danger");
-    }
+    } catch (e) { showNotice("Błąd usuwania!", "danger"); }
 }
 
 window.toggleEmployeeRole = async function(pin, newRole) {
     try {
         showNotice("Zmienianie uprawnień...", "info");
-        await fetch(PIN_API_URL, {
-            method: 'POST',
-            body: JSON.stringify({ action: 'toggle_role', pin: pin, role: newRole })
-        });
+        await fetch(PIN_API_URL, { method: 'POST', body: JSON.stringify({ action: 'toggle_role', pin: pin, role: newRole }) });
         await loadEmployeesToTable();
         showNotice("Zmieniono uprawnienia!", "success");
-    } catch (e) {
-        showNotice("Błąd zmiany uprawnień!", "danger");
-    }
+    } catch (e) { showNotice("Błąd zmiany uprawnień!", "danger"); }
 }
 
 // ==========================================
 // GENEROWANIE RAPORTU GRAFICZNEGO I DISCORD
 // ==========================================
-async function sendReportToDiscord() {
+window.sendReportToDiscord = async function() {
     const btn = document.getElementById('send-report-btn');
     const area = document.getElementById('report-visual-card');
     
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generowanie...';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generowanie...';
+    }
 
     const totalBuyVal = document.getElementById('total-buy').innerText;
     const totalSellVal = document.getElementById('total-sell').innerText;
@@ -856,12 +1189,12 @@ async function sendReportToDiscord() {
     document.getElementById('v-sell').innerText = totalSellVal;
     document.getElementById('v-bal').innerText = totalBalVal;
     
-    const dFrom = document.getElementById('filter-date-from').value || "POCZĄTEK";
-    const dTo = document.getElementById('filter-date-to').value || "DZIŚ";
+    const dFrom = document.getElementById('filter-date-from') ? document.getElementById('filter-date-from').value : "POCZĄTEK";
+    const dTo = document.getElementById('filter-date-to') ? document.getElementById('filter-date-to').value : "DZIŚ";
     
-    const empSelectValue = document.getElementById('filter-employee').value;
+    const empSelectValue = document.getElementById('filter-employee') ? document.getElementById('filter-employee').value : "ALL";
     const empDisplay = empSelectValue === "ALL" ? "WSZYSCY" : empSelectValue.toUpperCase();
-    document.getElementById('v-report-date').innerText = `ZAKRES: ${dFrom} — ${dTo} | ${empDisplay}`;
+    document.getElementById('v-report-date').innerText = `ZAKRES: ${dFrom || "POCZĄTEK"} — ${dTo || "DZIŚ"} | ${empDisplay}`;
     
     const reportID = Math.random().toString(36).substr(2, 8).toUpperCase();
     document.getElementById('v-footer-id').innerText = `REPORT_ID: ${reportID}`;
@@ -884,7 +1217,7 @@ async function sendReportToDiscord() {
         const rows = Array.from(document.querySelectorAll(`#${sourceId} tr`)).slice(0, 5);
         const container = document.getElementById(targetId);
         
-        if (rows.length === 0 || rows[0].innerText.includes("Brak danych")) {
+        if (rows.length === 0 || rows[0].innerText.includes("Brak danych") || rows[0].innerHTML.includes("skeleton")) {
             container.innerHTML = `<div class="v-row"><span>Brak danych</span><span>0$</span></div>`;
             return;
         }
@@ -914,15 +1247,15 @@ async function sendReportToDiscord() {
             const payload = {
                 embeds: [{
                     title: "🏛️ PROTOKÓŁ ANALITYCZNY ZARZĄDU EL CARTEL",
-                    description: `Dokładne zestawienie operacji finansowych dla okresu:\n📅 **${dFrom} — ${dTo}**\n👤 Pracownik: **${empSelectValue === "ALL" ? "Wszyscy pracownicy" : empSelectValue}**`,
+                    description: `Dokładne zestawienie operacji finansowych dla okresu:\n📅 **${dFrom || "Początek"} — ${dTo || "Dziś"}**\n👤 Pracownik: **${empSelectValue === "ALL" ? "Wszyscy pracownicy" : empSelectValue}**`,
                     color: 3447003, 
                     fields: [
                         { name: "📉 Wydatki (skup)", value: `\`${totalBuyVal}\``, inline: true },
                         { name: "📈 Przychody (sprzedaż)", value: `\`${totalSellVal}\``, inline: true },
                         { name: "⚖️ Bilans", value: `\`${totalBalVal}\``, inline: true },
                         { name: "💎 Czysty zysk", value: ` 💰 ${totalProfitVal}`, inline: false },
-                        { name: "🏆 Top zaopatrzeniowcy (skup)", value: topBuyStr, inline: true },
-                        { name: "🚚 Top sprzedający (sprzedaż)", value: topSellStr, inline: true }
+                        { name: "🏆 Top zaopatrzeniowcy", value: topBuyStr, inline: true },
+                        { name: "🚚 Top sprzedający", value: topSellStr, inline: true }
                     ],
                     image: { url: "attachment://raport_elcartel.png" },
                     timestamp: new Date().toISOString(),
@@ -942,28 +1275,25 @@ async function sendReportToDiscord() {
     } catch (e) { 
         showNotice("Błąd przy generowaniu obrazu!", "danger"); 
     } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fab fa-discord"></i> Wyślij raport na kanał';
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fab fa-discord"></i> Wyślij raport na kanał';
+        }
     }
 }
 
 // ==========================================
 // POWIADOMIENIA I EVENTY
 // ==========================================
-function showNotice(msg, type) {
-    let colorClass = type;
-    if(type === 'info') colorClass = 'info';
-
+window.showNotice = function(msg, type = 'info') {
     const t = document.createElement('div');
-    t.className = `toast ${colorClass}`;
-    if(type === 'info') t.style.borderLeftColor = 'var(--accent-color)';
-
+    t.className = `toast ${type}`;
     t.innerText = msg;
     document.getElementById('toast-container').appendChild(t);
     
     setTimeout(() => { 
         t.style.opacity = '0'; 
-        setTimeout(() => t.remove(), 500); 
+        setTimeout(() => t.remove(), 300); 
     }, 3000);
 }
 
@@ -975,16 +1305,25 @@ document.addEventListener('DOMContentLoaded', () => {
         }); 
     }
     
-    // Podpięcie wyszukiwarki na żywo
     const feedSearchInput = document.getElementById('feed-search-input');
     if (feedSearchInput) {
         feedSearchInput.addEventListener('input', () => {
+            currentFeedLimit = 50; 
             if (window.renderLiveFeed) window.renderLiveFeed();
         });
     }
+
+    // ==========================================
+    // SCROLL TO TOP BUTTON WSTRZYKIWANIE
+    // ==========================================
+    const scrollBtnHTML = `
+        <button id="scrollToTopBtn" class="scroll-to-top" onclick="window.scrollTo({top: 0, behavior: 'smooth'})" title="Wróć na górę">
+            <i class="fas fa-arrow-up"></i>
+        </button>
+    `;
+    document.body.insertAdjacentHTML('beforeend', scrollBtnHTML);
 });
 
-// FUNKCJA ZWIJANIA TABEL
 window.toggleTable = function(id, header) {
     const el = document.getElementById(id);
     if (el) {
@@ -1003,27 +1342,32 @@ async function checkUpdates() {
         const serverVersion = data.version.trim();
         console.log(`[SYSTEM] Wersja lokalna: ${APP_VERSION} | Wersja na serwerze: ${serverVersion}`);
         if (serverVersion !== APP_VERSION) {
-            showUpdatePrompt();
+            if (localStorage.getItem('update_ignored_version') === serverVersion) {
+                return;
+            }
+            showUpdatePrompt(serverVersion);
         }
     } catch (e) {
-        // Ciche ignorowanie błędu
     }
 }
 
-function showUpdatePrompt() {
+function showUpdatePrompt(serverVersion) {
     if (document.getElementById('update-prompt')) return;
     const div = document.createElement('div');
     div.id = 'update-prompt';
     div.className = 'update-notify';
     div.innerHTML = `
         <span><i class="fas fa-sync-alt fa-spin"></i> Wgrano nową wersję systemu!</span>
-        <button class="update-btn-refresh" onclick="forceHardReload()">Odśwież</button>
+        <button class="update-btn-refresh" onclick="forceHardReload('${serverVersion}')">Odśwież</button>
     `;
     document.body.appendChild(div);
 }
 
-window.forceHardReload = async function() {
+window.forceHardReload = async function(serverVersion) {
     console.log("[SYSTEM] Inicjowanie twardego przeładowania...");
+    if (serverVersion) {
+        localStorage.setItem('update_ignored_version', serverVersion);
+    }
     if ('serviceWorker' in navigator) {
         const registrations = await navigator.serviceWorker.getRegistrations();
         for (let reg of registrations) {
