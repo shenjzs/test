@@ -1,11 +1,11 @@
-const APP_VERSION = "3.6.1";
+const APP_VERSION = "4.5.7";
 
 // ==========================================
 // KONFIGURACJA
 // ==========================================
-const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1503473517679874068/rCdQeWVlliG2MPP3Wzhzg1iJpCO4T9s-LsVW_mXbHUGBI18Xp09YLtqYd4VbZWitLP_f"; 
-const PIN_API_URL = "https://script.google.com/macros/s/AKfycbycnbsg8yC8Cqk0tF-6syzBTvTLvO-MyTgx-zqAPjgBXPR132MicKNtjNoq3WMQfmLR/exec";
-const REPORTS_API_URL = "https://script.google.com/macros/s/AKfycbwcbHTDSA5H0LO2hWYmBleL0z74CXyLYzm188cvhnQBLdbmrOw0r5OMj7QyPXivMZfzeg/exec";
+const DISCORD_WEBHOOK_URL = "https://elcartel-wbhk.bcjds9j7ht.workers.dev/zloto"; 
+const PIN_API_URL = "https://elcartel-wbhk.bcjds9j7ht.workers.dev/pin";
+const REPORTS_API_URL = "https://elcartel-wbhk.bcjds9j7ht.workers.dev/reports";
 
 // Ceny materiałów i wymogi (receptura na 1 sztabkę)
 const goldInventory = [
@@ -21,6 +21,56 @@ let currentEmployeeName = "";
 let currentCounts = {};
 let isBoss = false;
 
+// ==========================================
+// UNIWERSALNY SYSTEM LOGOWANIA DO BAZY (DZIENNIK ZDARZEŃ)
+// ==========================================
+window.addSystemLog = async function(type, description) {
+    const who = window.currentEmployeeName || currentEmployeeName || "Nieznany Szef";
+    try {
+        fetch(REPORTS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }, // <--- DODANY NAGŁÓWEK
+            body: JSON.stringify({
+                action: 'save_log',
+                date: getFormattedDateTime(), // <--- DODANY LOKALNY CZAS
+                employee: who,
+                type: type,
+                description: description
+            })
+        });
+    } catch (e) {
+        console.error("Błąd zapisu logu:", e);
+    }
+};
+
+// --- EFEKTY CYFROWEGO ODLICZANIA I PULSOWANIA ---
+let previousTotalCost = 0;
+
+window.animateValue = function(element, start, end, duration) {
+    if (!element) return;
+    let startTimestamp = null;
+    const step = (timestamp) => {
+        if (!startTimestamp) startTimestamp = timestamp;
+        const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+        const easeProgress = 1 - Math.pow(1 - progress, 5);
+        const currentVal = Math.floor(easeProgress * (end - start) + start);
+        element.innerText = currentVal + '$';
+        if (progress < 1) window.requestAnimationFrame(step);
+        else element.innerText = end + '$';
+    };
+    window.requestAnimationFrame(step);
+};
+
+window.triggerPulseEffect = function(totalId, badgeId) {
+    const totalEl = document.getElementById(totalId);
+    if (totalEl) {
+        totalEl.classList.remove('pulse-anim');
+        void totalEl.offsetWidth;
+        totalEl.classList.add('pulse-anim');
+    }
+};
+// ------------------------------------------------
+
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
 function getFormattedDate() {
@@ -35,6 +85,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (e.key === 'Enter') login();
         });
     }
+    
+    // --- INICJALIZACJA ZAPISANEGO PROFILU NA STARCIE ---
+    if (typeof window.checkSavedBossProfile === 'function') window.checkSavedBossProfile();
 });
 
 // Nasłuchiwanie scrolla, żeby zwinąć pasek w ikonki
@@ -61,37 +114,154 @@ async function login() {
 
         if (data.isValid) {
             if (data.role && data.role.toLowerCase() === 'szef') {
-                currentEmployeeName = data.name;
-                isBoss = true;
-                
-                document.getElementById('logged-user-name').innerText = currentEmployeeName.toUpperCase();
-                document.getElementById('login-screen').classList.remove('active');
-                document.getElementById('main-app').style.display = 'block';
-                document.getElementById('user-profile').style.display = 'block';
-                document.getElementById('header-date').innerText = getFormattedDate();
-                
-                renderGoldItems();
-                loadWarehouseData();
+                // --- SYSTEM ZAPAMIĘTYWANIA PROFILU ---
+                const rememberMeCheckbox = document.getElementById('remember-me-checkbox');
+                if (rememberMeCheckbox && rememberMeCheckbox.checked) {
+                    let savedProfiles = JSON.parse(localStorage.getItem('elcartel_gold_profiles') || '[]');
+                    savedProfiles = savedProfiles.filter(p => p.name !== data.name);
+                    savedProfiles.push({ 
+                        name: data.name, 
+                        pin: pin, 
+                        photo: data.photo || '',
+                        ssn: data.ssn || '---',
+                        dateZatrudnienia: data.dateZatrudnienia || 'Brak danych',
+                        rank: data.rank || 'Pracownik' // Pobieranie faktycznego stopnia z bazy
+                    });
+                    localStorage.setItem('elcartel_gold_profiles', JSON.stringify(savedProfiles));
+                    if (typeof renderSavedProfiles === 'function') renderSavedProfiles();
+                }
+                // ------------------------------------
 
-                document.getElementById('boss-stats-section').style.display = 'block';
-                document.getElementById('admin-tools-trigger').style.display = 'block';
-                loadGoldStats(); 
-                
-                showNotice(`Witaj w odlewni ${data.name}!`, "success");
+                // --- EFEKT FACE ID (otwieranie kłódki) ---
+                const mainIcon = document.querySelector('.login-icon');
+                if (mainIcon) {
+                    mainIcon.classList.remove('fa-lock');
+                    mainIcon.classList.add('fa-unlock', 'icon-unlock-anim');
+                }
+
+                // Opóźnienie na zjazd ekranu, by było widać animację
+                setTimeout(() => {
+                    currentEmployeeName = data.name;
+                    isBoss = true;
+                    
+                    document.getElementById('logged-user-name').innerText = currentEmployeeName.toUpperCase();
+                    document.getElementById('login-screen').classList.remove('active');
+                    document.getElementById('main-app').style.display = 'block';
+                    document.getElementById('user-profile').style.display = 'block';
+                    document.getElementById('header-date').innerText = getFormattedDate();
+                    
+                    // DODANIE LOGU
+                    window.addSystemLog('LOGOWANIE', `Zalogowano do panelu odlewni.`);
+
+                    renderGoldItems();
+                    loadWarehouseData();
+
+                    document.getElementById('boss-stats-section').style.display = 'block';
+                    document.getElementById('admin-tools-trigger').style.display = 'block';
+                    loadGoldStats(); 
+                    
+                    showNotice(`Witaj w odlewni ${data.name}!`, "success");
+                    btn.disabled = false;
+                    btn.innerHTML = 'Zaloguj <i class="fas fa-lock"></i>';
+                }, 600);
             } else {
                 showNotice("Nie jesteś uprawniony, aby się zalogować.", "danger");
                 document.getElementById('employee-login-pin').value = "";
+                btn.disabled = false;
+                btn.innerHTML = 'Zaloguj <i class="fas fa-lock"></i>';
             }
         } else {
             showNotice("Nieprawidłowy PIN!", "danger");
+            window.addSystemLog('BŁĘDNY PIN', `Niewłaściwa próba autoryzacji do panelu odlewni (Użyto niepoprawnego kodu PIN w zloto.html).`);
+            btn.disabled = false;
+            btn.innerHTML = 'Zaloguj <i class="fas fa-lock"></i>';
+
+            // --- EFEKT BŁĘDNEGO PINU (trzęsienie) ---
+            const mainIcon = document.querySelector('.login-icon');
+            if (mainIcon) {
+                mainIcon.classList.add('icon-shake-anim');
+                setTimeout(() => mainIcon.classList.remove('icon-shake-anim'), 400);
+            }
         }
     } catch (error) {
         showNotice("Błąd bazy PIN!", "danger");
-    } finally {
         btn.disabled = false;
         btn.innerHTML = 'Zaloguj <i class="fas fa-lock"></i>';
     }
 }
+
+// ==========================================
+// FUNKCJE SYSTEMU SZYBKIEGO LOGOWANIA
+// ==========================================
+window.renderSavedProfiles = function() {
+    const container = document.getElementById('saved-profiles-container');
+    if (!container) return;
+    const profiles = JSON.parse(localStorage.getItem('elcartel_gold_profiles') || '[]');
+    
+    if (profiles.length === 0) {
+        container.innerHTML = '';
+        container.style.display = 'none';
+        return;
+    }
+    
+    container.style.display = 'flex';
+    let html = '';
+
+    profiles.forEach((p, index) => {
+        const avatarHtml = p.photo && p.photo !== "" 
+            ? `<img src="${p.photo}" class="saved-profile-avatar" alt="${p.name}">` 
+            : `<div class="saved-profile-avatar" style="display:flex; justify-content:center; align-items:center; font-size:1.5rem; color:var(--text-secondary);"><i class="fas fa-user-tie"></i></div>`;
+        
+        html += `
+            <div class="saved-profile-card" onclick="quickLogin('${p.pin}')">
+                ${avatarHtml}
+                <span class="saved-profile-name">${p.name}</span>
+                <button class="remove-profile-btn" onclick="removeSavedProfile(${index}, event)" title="Usuń zapisany profil"><i class="fas fa-times"></i></button>
+                
+                <div class="profile-mini-stats">
+                    <div class="stats-header">Zapisany profil</div>
+                    <div class="stats-row">
+                        <span><i class="fas fa-star text-secondary"></i> Stopień:</span>
+                        <strong style="color: var(--accent-color); font-weight: 800;">${p.rank || 'Pracownik'}</strong>
+                    </div>
+                    <div class="stats-row">
+                        <span><i class="fas fa-hashtag text-secondary"></i> SSN:</span>
+                        <strong class="text-white-inline">${p.ssn || '---'}</strong>
+                    </div>
+                    <div class="stats-row">
+                        <span><i class="fas fa-calendar-alt text-secondary"></i> Zatrudnienie:</span>
+                        <strong class="text-white-inline" style="font-size: 0.75rem;">${p.dateZatrudnienia || 'Brak danych'}</strong>
+                    </div>
+                    <div class="stats-hint">Kliknij, aby zalogować</div>
+                </div>
+            </div>
+        `;
+    });
+    container.innerHTML = html;
+}
+
+window.quickLogin = function(pin) {
+    const pinInput = document.getElementById('employee-login-pin');
+    if (pinInput) {
+        pinInput.value = pin;
+        window.login(); 
+    }
+}
+
+window.removeSavedProfile = function(index, event) {
+    event.stopPropagation(); 
+    let profiles = JSON.parse(localStorage.getItem('elcartel_gold_profiles') || '[]');
+    profiles.splice(index, 1);
+    localStorage.setItem('elcartel_gold_profiles', JSON.stringify(profiles));
+    renderSavedProfiles();
+    if (typeof showNotice === 'function') {
+        showNotice("Usunięto zapisany profil.", "info");
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof renderSavedProfiles === 'function') renderSavedProfiles();
+});
 
 // ==========================================
 // KOREKTA ZALEGŁEGO MAGAZYNU (MODAL)
@@ -141,6 +311,10 @@ window.submitKorekta = async function(isAdding) {
             method: "POST", 
             body: JSON.stringify(payload) 
         });
+        
+        // DODANIE LOGU
+        window.addSystemLog('KOREKTA MAGAZYNU', `Zastosowano korektę w odlewni. Akcja: ${isAdding ? 'DODATNIA (+)' : 'UJEMNA (-)'}, Przedmiot: ${itemName}, Ilość: ${qty} szt.`);
+
         showNotice("Pomyślnie zaktualizowano magazyn!", "success");
         closeKorektaModal();
         
@@ -268,11 +442,13 @@ window.updateCount = function(i, change) {
     currentCounts[i] = Math.max(0, currentCounts[i] + change);
     document.getElementById(`count-${i}`).value = currentCounts[i];
     calculateZloto();
+    window.triggerPulseEffect('total-cost', null);
 }
 
 window.handleInput = function(i, val) {
     currentCounts[i] = Math.max(0, parseInt(val) || 0);
     calculateZloto();
+    window.triggerPulseEffect('total-cost', null);
 }
 
 function calculateZloto() {
@@ -294,13 +470,20 @@ function calculateZloto() {
     let barValue = possibleBars * PRICE_PER_GOLD_BAR;
     let pureProfit = barValue - totalSpent;
 
-    document.getElementById('total-cost').innerText = totalSpent + '$';
+    const totalCostEl = document.getElementById('total-cost');
+    if(totalCostEl) {
+        window.animateValue(totalCostEl, previousTotalCost, totalSpent, 400);
+        previousTotalCost = totalSpent;
+    }
+
     document.getElementById('possible-bars').innerText = possibleBars + ' szt.';
     document.getElementById('gold-bar-value').innerText = barValue + '$';
 
     const pureEl = document.getElementById('pure-profit');
-    pureEl.innerText = (pureProfit >= 0 ? '+' : '') + pureProfit + '$';
-    pureEl.style.color = pureProfit >= 0 ? 'var(--success)' : 'var(--danger)';
+    if(pureEl) {
+        pureEl.innerText = (pureProfit >= 0 ? '+' : '') + pureProfit + '$';
+        pureEl.style.color = pureProfit >= 0 ? 'var(--success)' : 'var(--danger)';
+    }
 }
 
 async function processSmelting() {
@@ -358,20 +541,42 @@ async function processSmelting() {
     };
 
     try {
+        // PANCERNY UKŁAD 2-KOLUMNOWY DLA ZŁOTA
+        const zysk = payload.revenue - payload.total;
+        const profitText = zysk >= 0 ? `+${zysk}$` : `${zysk}$`;
+
+        const embedFields = [
+            { 
+                name: "Dane operacji", 
+                value: `**👤 Pracownik:**\n\`${currentEmployeeName}\`\n\n**📦 Przetopiono:**\n\`${payload.items}\``, 
+                inline: true 
+            },
+            { 
+                name: "Rozliczenie finansowe", 
+                value: `**📉 Koszt materiałów:**\n**${payload.total}$**\n\n**📈 Wartość sztabek:**\n**${payload.revenue}$**\n\n**💰 Zysk na czysto:**\n**${profitText}**`, 
+                inline: true 
+            }
+        ];
+
         const discordPayload = {
+            username: currentEmployeeName || "Pracownik",
             embeds: [{
                 title: "🔥 NOWY WYTOP ZŁOTA",
                 color: 15571200,
-                fields: [
-                    { name: "Pracownik", value: currentEmployeeName, inline: true },
-                    { name: "Wydatki na skup", value: payload.total + "$", inline: true },
-                    { name: "Wartość sztabek", value: payload.revenue + "$", inline: true },
-                    { name: "Zysk na operacji", value: (payload.revenue - payload.total) + "$", inline: false },
-                    { name: "Wykorzystane surowce", value: payload.items }
-                ],
-                timestamp: new Date().toISOString()
+                fields: embedFields,
+                timestamp: new Date().toISOString(),
+                footer: { text: "System EL CARTEL ODLEWNIA" }
             }]
         };
+
+        // Wyciąganie zdjęcia pracownika z pamięci przeglądarki (żeby awatar działał tak jak w kasie)
+        try {
+            const profiles = JSON.parse(localStorage.getItem('elcartel_gold_profiles') || '[]');
+            const currentProfile = profiles.find(p => p.name === currentEmployeeName);
+            if (currentProfile && currentProfile.photo && currentProfile.photo.trim() !== "") {
+                discordPayload.avatar_url = currentProfile.photo;
+            }
+        } catch (e) {}
         
         const formData = new FormData();
         formData.append("payload_json", JSON.stringify(discordPayload));
@@ -385,6 +590,9 @@ async function processSmelting() {
             method: "POST", 
             body: JSON.stringify(payload) 
         }).catch(e => console.error("Google Sheets Error:", e));
+
+        // DODANIE LOGU
+        window.addSystemLog('PRZETOP ZŁOTA', `Przetopiono surowce na sztabki złota (x${possibleBars}). Wartość: ${barValue}$`);
 
         showNotice("Przetopiono pomyślnie! Logi wysłane.", "success");
         resetSmeltery();
@@ -485,7 +693,39 @@ window.loadGoldStats = async function() {
 }
 
 function logout() {
-    location.reload();
+    window.addSystemLog('WYLOGOWANIE', `Wylogowano z panelu odlewni.`);
+    
+    const mainApp = document.getElementById('main-app');
+    const loginScreen = document.getElementById('login-screen');
+    const loginCard = document.querySelector('.login-card');
+    const mainIcon = document.querySelector('.login-icon');
+
+    document.getElementById('user-dropdown').classList.remove('active');
+    document.getElementById('user-profile').style.display = 'none';
+
+    mainApp.classList.add('app-zoom-in');
+
+    setTimeout(() => {
+        mainApp.style.display = 'none';
+        
+        loginScreen.classList.add('active');
+        loginCard.classList.add('login-zoom-out');
+
+        // Zostawiamy otwartą kłódkę na czas wjazdu karty
+        if (mainIcon) {
+            mainIcon.className = 'fas fa-unlock login-icon';
+            
+            // Wydłużone opóźnienie: czeka aż karta w pełni wyląduje (550ms)
+            setTimeout(() => {
+                mainIcon.className = 'fas fa-lock login-icon icon-lock-anim';
+            }, 550);
+        }
+
+        // Wydłużemy czas do restartu strony (550ms czekania + 500ms animacji = ok. 1200ms całkowitego czasu)
+        setTimeout(() => {
+            location.reload();
+        }, 1200);
+    }, 400);
 }
 
 function toggleUserMenu() {
@@ -557,3 +797,23 @@ window.forceHardReload = async function(serverVersion) {
 
 setInterval(checkUpdates, 60000);
 setTimeout(checkUpdates, 3000);
+
+// ==========================================
+// AUTOMATYCZNE WYLOGOWANIE PRZY ZAMKNIĘCIU OKNA/KARTY
+// ==========================================
+window.addEventListener('beforeunload', function() {
+    if (currentEmployeeName) {
+        fetch(REPORTS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }, // <--- DODANY NAGŁÓWEK
+            keepalive: true,
+            body: JSON.stringify({
+                action: 'save_log',
+                date: getFormattedDateTime(), // <--- DODANY LOKALNY CZAS
+                employee: currentEmployeeName,
+                type: 'WYLOGOWANIE',
+                description: 'Zamknięto kartę lub okno panelu odlewni (automatyczne wylogowanie).'
+            })
+        });
+    }
+});

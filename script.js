@@ -1,21 +1,11 @@
-// ==========================================
-// WERSJA APLIKACJI
-// ==========================================
-const APP_VERSION = "3.6.1";
+const APP_VERSION = "4.5.7";
 let LATEST_CHANGELOG_VERSION = APP_VERSION; 
 
-// ==========================================
-// KONFIGURACJA I API
-// ==========================================
-const DISCORD_WEBHOOK_URL_SKUP = "https://discord.com/api/webhooks/1500540604827046078/_uzuOq6EK9Ip0XggKscXNsmPRZrl4EdmBSLcWcMRaavI0wimpqkxWIRn8TrELISJ6RZQ"; 
-const DISCORD_WEBHOOK_URL_EXPORT = "https://discord.com/api/webhooks/1500573620605550725/VmpdLB3qN1FT6Jkf-U-Wo1cig-WEpVjleki4f-EA45G5QfSuBJeC3f1fqCKB_LTeXOQ5";
+const DISCORD_WEBHOOK_URL_SKUP = "https://elcartel-wbhk.bcjds9j7ht.workers.dev/skup"; 
+const DISCORD_WEBHOOK_URL_EXPORT = "https://elcartel-wbhk.bcjds9j7ht.workers.dev/export";
+const PIN_API_URL = "https://elcartel-wbhk.bcjds9j7ht.workers.dev/pin";
+const REPORTS_API_URL = "https://elcartel-wbhk.bcjds9j7ht.workers.dev/reports";
 
-const PIN_API_URL = "https://script.google.com/macros/s/AKfycbycnbsg8yC8Cqk0tF-6syzBTvTLvO-MyTgx-zqAPjgBXPR132MicKNtjNoq3WMQfmLR/exec";
-const REPORTS_API_URL = "https://script.google.com/macros/s/AKfycbwcbHTDSA5H0LO2hWYmBleL0z74CXyLYzm188cvhnQBLdbmrOw0r5OMj7QyPXivMZfzeg/exec";
-
-// ==========================================
-// ZMIENNE GLOBALNE (WSPÓLNE)
-// ==========================================
 let currentEmployeeName = ""; 
 let currentEmployeeRank = "Pracownik"; 
 let currentEmployeeSsn = "---"; 
@@ -23,51 +13,203 @@ let currentEmployeeDateZatrudnienia = "---";
 let currentEmployeePhoto = ""; 
 let currentActiveView = 'skup';
 
+let showImagesSkup = localStorage.getItem('elcartel_images_skup') !== 'false';
+let showImagesExport = localStorage.getItem('elcartel_images_export') !== 'false';
+
 let myStatsRawData = [];
+let myBonusesRawData = [];
 let currentStatsType = 'skup';
 let currentStatsRange = 'today';
-
 let currentReportReceiptId = ""; 
 
+// Zmienna przechowująca dane wyszukanego klienta (Karty Lojalnościowe)
+let currentLoyaltyCustomer = null;
+
+// ZMIENNE DLA WIDŻETU ONLINE I INTELIGENTNEGO PRE-LOADINGU
+let onlineCheckInterval = null;
+window.currentEmployeesList = [];
+window.reportsFetchPromise = null;
+window.bonusesFetchPromise = null;
+window.errorReportsFetchPromise = null;
+
 // ==========================================
-// FUNKCJA AUTORYZACJI SZEFA
+// UNIWERSALNY SYSTEM LOGOWANIA DO BAZY (DZIENNIK ZDARZEŃ)
 // ==========================================
+window.addSystemLog = async function(type, description) {
+    const who = window.currentEmployeeName || currentEmployeeName || "Nieznany Pracownik";
+    try {
+        fetch(REPORTS_API_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+                action: 'save_log',
+				date: getFormattedDateTime(),
+                employee: who,
+                type: type,
+                description: description
+            })
+        });
+    } catch (e) {
+        console.error("Błąd zapisu logu:", e);
+    }
+};
+
+// ==========================================
+// SYSTEM ODTWARZANIA DŹWIĘKÓW SYSTEMOWYCH
+// ==========================================
+window.playSystemSound = function(soundName) {
+    const audioEnabled = localStorage.getItem('elcartel_audio_enabled') !== 'false';
+    if (!audioEnabled) return;
+    try {
+        const audio = new Audio(`audio/${soundName}.mp3`);
+        audio.play();
+    } catch (e) {
+        console.error("Błąd odtwarzania dźwięku:", e);
+    }
+};
+
+// Funkcje inteligentnego pobierania danych w tle (Predictive Fetch)
+window.preloadReportsData = function() {
+    if (!window.reportsFetchPromise) {
+        window.reportsFetchPromise = fetch(`${REPORTS_API_URL}?action=get_reports&t=${new Date().getTime()}`)
+            .then(res => res.json())
+            .catch(err => {
+                window.reportsFetchPromise = null;
+                return [];
+            });
+    }
+    return window.reportsFetchPromise;
+};
+
+window.preloadBonusesData = function() {
+    if (!window.bonusesFetchPromise) {
+        window.bonusesFetchPromise = fetch(`${REPORTS_API_URL}?action=get_bonuses&t=${new Date().getTime()}`)
+            .then(res => res.json())
+            .catch(err => {
+                window.bonusesFetchPromise = null;
+                return { bonuses: [] };
+            });
+    }
+    return window.bonusesFetchPromise;
+};
+
+window.preloadErrorReportsData = function() {
+    if (!window.errorReportsFetchPromise) {
+        window.errorReportsFetchPromise = fetch(`${REPORTS_API_URL}?action=get_error_reports&t=${new Date().getTime()}`)
+            .then(res => res.json())
+            .catch(err => {
+                window.errorReportsFetchPromise = null;
+                return [];
+            });
+    }
+    return window.errorReportsFetchPromise;
+};
+
+window.formatMoney = function(amount) {
+    if (isNaN(amount)) return "0";
+    return Math.round(amount).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+};
+
+// --- EFEKTY CYFROWEGO ODLICZANIA I PULSOWANIA ---
+window.animateValue = function(element, start, end, duration) {
+    if (!element) return;
+    let startTimestamp = null;
+    const step = (timestamp) => {
+        if (!startTimestamp) startTimestamp = timestamp;
+        const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+        const easeProgress = 1 - Math.pow(1 - progress, 5); // Płynne zwalnianie na końcu
+        const currentVal = Math.floor(easeProgress * (end - start) + start);
+        element.innerText = currentVal + '$';
+        if (progress < 1) {
+            window.requestAnimationFrame(step);
+        } else {
+            element.innerText = end + '$';
+        }
+    };
+    window.requestAnimationFrame(step);
+};
+
+window.triggerPulseEffect = function(totalId, badgeId) {
+    const totalEl = document.getElementById(totalId);
+    const badgeEl = badgeId ? document.getElementById(badgeId) : null;
+    if (totalEl) {
+        totalEl.classList.remove('pulse-anim');
+        void totalEl.offsetWidth; // Wymuszenie resetu animacji w CSS
+        totalEl.classList.add('pulse-anim');
+    }
+    if (badgeEl) {
+        badgeEl.classList.remove('pulse-anim');
+        void badgeEl.offsetWidth;
+        badgeEl.classList.add('pulse-anim');
+    }
+};
+// ------------------------------------------------
+
 function isTravisVance() {
     return currentEmployeeName && currentEmployeeName.trim().toLowerCase() === "travis vance";
 }
 
-// ==========================================
-// BAZA DANYCH - SKUP (KASA)
-// ==========================================
 const defaultInventory = [
-    { name: "Zdobiona książka", min: 120, max: 120, category: "inne" },
-    { name: "Dywan", min: 240, max: 240, category: "dom" },
-    { name: "Komputer (laptop)", min: 600, max: 600, category: "elektronika" },
-    { name: "Komputer (stacjonarny)", min: 680, max: 680, category: "elektronika" },
-    { name: "Konsola", min: 400, max: 400, category: "elektronika" },
-    { name: "Konsola DJ", min: 640, max: 640, category: "elektronika" },
-    { name: "Kobieca plastikowa figurka", min: 100, max: 100, category: "inne" },
-    { name: "Plastikowa figurka małpki", min: 80, max: 80, category: "inne" },
-    { name: "Kwiat", min: 65, max: 65, category: "dom" },
-    { name: "Gitara elektryczna", min: 480, max: 480, category: "elektronika" },
-    { name: "Dziwna substancja", min: 100, max: 100, category: "inne" },
-    { name: "Dziwna szara substancja", min: 160, max: 160, category: "inne" },
-    { name: "Biżuteria", min: 240, max: 240, category: "biżuteria" },
-    { name: "Brudna biżuteria", min: 150, max: 150, category: "biżuteria" },
-    { name: "Katana", min: 480, max: 480, category: "inne" },
-    { name: "Mikrofala", min: 280, max: 280, category: "dom" },
-    { name: "Mikser", min: 160, max: 160, category: "dom" },
-    { name: "Monitor", min: 150, max: 150, category: "elektronika" },
-    { name: "Obraz", min: 115, max: 115, category: "dom" },
-    { name: "Obraz ścienny", min: 180, max: 180, category: "dom" },
-    { name: "Głośnik", min: 145, max: 145, category: "elektronika" },
-    { name: "Telewizor", min: 600, max: 600, category: "elektronika" },
-    { name: "Zegarek", min: 160, max: 160, category: "biżuteria" },
-    { name: "Złota bransoletka", min: 200, max: 200, category: "biżuteria" },
-    { name: "Złota moneta", min: 200, max: 200, category: "inne" },
-    { name: "Złota moneta z prezydentem", min: 200, max: 200, category: "inne" },
-    { name: "Złote kolczyki", min: 200, max: 200, category: "biżuteria" },
-    { name: "Popsuty telefon", min: 95, max: 95, category: "elektronika" }
+    { name: "Zdobiona książka", min: 120, max: 120, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/hr_book.webp", slots: 4, maxStack: 1 },
+    { name: "Dywan", min: 240, max: 240, category: "dom", image: "https://img.realmgaming.eu/onbeat/items/hr_carpet.webp", slots: 4, maxStack: 1 },
+    { name: "Komputer (laptop)", min: 600, max: 600, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/hr_computer.webp", slots: 4, maxStack: 1 },
+    { name: "Komputer (stacjonarny)", min: 680, max: 680, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/hr_computer2.webp", slots: 4, maxStack: 1 },
+    { name: "Konsola", min: 400, max: 400, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/hr_console.webp", slots: 4, maxStack: 1 },
+    { name: "Konsola DJ", min: 640, max: 640, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/hr_djconsole.webp", slots: 4, maxStack: 1 },
+    { name: "Kobieca plastikowa figurka", min: 100, max: 100, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/hr_figure.webp", slots: 4, maxStack: 1 },
+    { name: "Plastikowa figurka małpki", min: 80, max: 80, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/hr_figure2.webp", slots: 4, maxStack: 1 },
+    { name: "Kwiat", min: 65, max: 65, category: "dom", image: "https://img.realmgaming.eu/onbeat/items/hr_flower.webp", slots: 4, maxStack: 1 },
+    { name: "Gitara elektryczna", min: 480, max: 480, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/hr_guitar.webp", slots: 4, maxStack: 1 },
+    { name: "Dziwna substancja", min: 100, max: 100, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/hr_jerrycan.webp", slots: 4, maxStack: 1 },
+    { name: "Dziwna szara substancja", min: 160, max: 160, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/hr_jerrycan2.webp", slots: 4, maxStack: 5 },
+    { name: "Biżuteria", min: 240, max: 240, category: "biżuteria", image: "https://img.realmgaming.eu/onbeat/items/hr_jewelery.webp", slots: 1, maxStack: 1 },
+    { name: "Brudna biżuteria", min: 150, max: 150, category: "biżuteria", image: "https://img.realmgaming.eu/onbeat/items/hr_jewelery.webp", slots: 1, maxStack: 1 },
+    { name: "Katana", min: 480, max: 480, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/hr_katana.webp", slots: 4, maxStack: 1 },
+    { name: "Mikrofala", min: 280, max: 280, category: "dom", image: "https://img.realmgaming.eu/onbeat/items/hr_microwave.webp", slots: 4, maxStack: 1 },
+    { name: "Mikser", min: 160, max: 160, category: "dom", image: "https://img.realmgaming.eu/onbeat/items/hr_mixer.webp", slots: 4, maxStack: 1 },
+    { name: "Monitor", min: 150, max: 150, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/hr_monitor.webp", slots: 4, maxStack: 1 },
+    { name: "Obraz", min: 115, max: 115, category: "dom", image: "https://img.realmgaming.eu/onbeat/items/hr_painting.webp", slots: 4, maxStack: 1 },
+    { name: "Obraz ścienny", min: 180, max: 180, category: "dom", image: "https://img.realmgaming.eu/onbeat/items/hr_paiting2.webp", slots: 4, maxStack: 1 },
+    { name: "Głośnik", min: 145, max: 145, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/hr_speaker.webp", slots: 4, maxStack: 1 },
+    { name: "Telewizor", min: 600, max: 600, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/hr_tv.webp", slots: 4, maxStack: 1 },
+    { name: "Zegarek", min: 160, max: 160, category: "biżuteria", image: "https://img.realmgaming.eu/onbeat/items/hr_watch.webp", slots: 1, maxStack: 5 },
+    { name: "Zepsuty telefon", min: 95, max: 95, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/brokenphone.webp", slots: 2, maxStack: 5 },
+    { name: "Złota bransoletka", min: 200, max: 200, category: "biżuteria", image: "https://img.realmgaming.eu/onbeat/items/goldenbracelet.webp", slots: 2, maxStack: 1 },
+    { name: "Złota moneta", min: 200, max: 200, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/goldcoin.webp", slots: 1, maxStack: 20 },
+    { name: "Złota moneta z prezydentem", min: 200, max: 200, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/prescoin42.webp", slots: 1, maxStack: 5 },
+    { name: "Złote kolczyki", min: 200, max: 200, category: "biżuteria", image: "https://img.realmgaming.eu/onbeat/items/goldenearrings.webp", slots: 2, maxStack: 1 },
+    { name: "Muszle morskie", min: 90, max: 90, category: "skarby", image: "https://img.realmgaming.eu/onbeat/items/pirates_shells.webp", slots: 2, maxStack: 5 },
+    { name: "Mała szara muszla", min: 70, max: 70, category: "skarby", image: "https://img.realmgaming.eu/onbeat/items/pirates_seashell1.webp", slots: 1, maxStack: 10 },
+    { name: "Gwiazda morska", min: 60, max: 60, category: "skarby", image: "https://img.realmgaming.eu/onbeat/items/pirates_star.webp", slots: 1, maxStack: 5 },
+    { name: "Ząb rekina", min: 80, max: 80, category: "skarby", image: "https://img.realmgaming.eu/onbeat/items/pirates_sharktooth.webp", slots: 1, maxStack: 5 },
+    { name: "Stary płaszcz piracki", min: 200, max: 200, category: "skarby", image: "https://img.realmgaming.eu/onbeat/items/pirates_coat.webp", slots: 6, maxStack: 5 },
+    { name: "Różowa perła", min: 350, max: 350, category: "skarby", image: "https://img.realmgaming.eu/onbeat/items/pirates_pinkpearl.webp", slots: 1, maxStack: 5 },
+    { name: "Zniszczona flaga piratów", min: 200, max: 200, category: "skarby", image: "https://img.realmgaming.eu/onbeat/items/pirates_flag.webp", slots: 2, maxStack: 5 },
+    { name: "Kapelusz piracki", min: 200, max: 200, category: "skarby", image: "https://img.realmgaming.eu/onbeat/items/pirates_hat.webp", slots: 6, maxStack: 5 },
+    { name: "Szkatuła ze złotymi łańcuchami", min: 400, max: 400, category: "skarby", image: "https://img.realmgaming.eu/onbeat/items/pirates_treasure.webp", slots: 6, maxStack: 5 },
+    { name: "Zabytkowa szabla", min: 350, max: 350, category: "skarby", image: "https://img.realmgaming.eu/onbeat/items/pirates_saber.webp", slots: 2, maxStack: 5 },
+    { name: "Legendarna fajka", min: 400, max: 400, category: "skarby", image: "https://img.realmgaming.eu/onbeat/items/pirates_pipe.webp", slots: 2, maxStack: 5 },
+    { name: "Zdobiona zapalniczka", min: 0, max: 0, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/metallighter.webp", dynamicPrice: true, slots: 2, maxStack: 1 },
+    { name: "Złoty zegarek", min: 0, max: 0, category: "biżuteria", image: "https://img.realmgaming.eu/onbeat/items/zloty_zegarek.webp", dynamicPrice: true, slots: 1, maxStack: 5 },
+    { name: "Dziwny telefon", min: 0, max: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/trapphone.webp", dynamicPrice: true, slots: 2, maxStack: 5 },
+    { name: "Dziwna paczka", min: 0, max: 0, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/podejrzana_paczka.webp", dynamicPrice: true, slots: 6, maxStack: 20 },
+    { name: "Dziwny pendrive", min: 0, max: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/pendrive.webp", dynamicPrice: true, slots: 1, maxStack: 5 },
+    { name: "Zielony pendrive", min: 0, max: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/pendrive_zielony.webp", dynamicPrice: true, slots: 1, maxStack: 5 },
+    { name: "Prymitywny wkład do kamizelki", min: 0, max: 0, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/armor_25.webp", dynamicPrice: true, slots: 4, maxStack: 20 },
+    { name: "Wytrych", min: 0, max: 0, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/lockpick.webp", dynamicPrice: true, slots: 2, maxStack: 2 },
+    { name: "Tablet G6420", min: 0, max: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/tablet_green.webp", dynamicPrice: true, slots: 1, maxStack: 1 },
+    { name: "Sprężyna", min: 0, max: 0, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/spring.webp", dynamicPrice: true, slots: 4, maxStack: 5 },
+    { name: "Śmieci elektroniczne", min: 0, max: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/electrotrash.webp", dynamicPrice: true, slots: 4, maxStack: 3 },
+    { name: "Moduł do telefonu", min: 0, max: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/modul_telefoniczny.webp", dynamicPrice: true, slots: 2, maxStack: 5 },
+    { name: "Elementy do laptopa", min: 0, max: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/elementy_do_laptopa.webp", dynamicPrice: true, slots: 4, maxStack: 5 },
+    { name: "Krótkofalówka", min: 0, max: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/radio.webp", dynamicPrice: true, slots: 2, maxStack: 1 },
+    { name: "Legitymacja Bobcat - Niko Bellic", min: 0, max: 0, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/bobcat_entrance.webp", dynamicPrice: true, slots: 1, maxStack: 5 },
+    { name: "Dekoder do alarmu", min: 0, max: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/dekoder_house.webp", dynamicPrice: true, slots: 2, maxStack: 5 },
+    { name: "Dekoder do pojazdu", min: 0, max: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/decoder_car.webp", dynamicPrice: true, slots: 2, maxStack: 5 },
+    { name: "Radio samochodowe", min: 0, max: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/car_radio.webp", dynamicPrice: true, slots: 2, maxStack: 5 },
+    { name: "Antena", min: 0, max: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/antena.webp", dynamicPrice: true, slots: 1, maxStack: 5 },
+    { name: "Zardzewiała blacha", min: 0, max: 0, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/zardzewialy_metal.webp", dynamicPrice: true, slots: 1, maxStack: 5 },
+    { name: "Cygaro Havana", min: 0, max: 0, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/cygaro_havana.webp", dynamicPrice: true, slots: 1, maxStack: 5 },
+    { name: "Butelka rumu pirackiego", min: 0, max: 0, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/rum_piracki.webp", dynamicPrice: true, slots: 2, maxStack: 1 }
 ];
 
 let inventory = [];
@@ -78,37 +220,67 @@ let currentMaxTotal = 0;
 let isStatAddedForCurrentReceipt = false;
 let currentCustomerSSN = "";
 
-// ==========================================
-// BAZA DANYCH - EKSPORT (SPRZEDAŻ)
-// ==========================================
 const defaultExportInventory = [
-    { name: "Zdobiona książka", price: 150, category: "inne" },
-    { name: "Dywan", price: 300, category: "dom" },
-    { name: "Komputer (laptop)", price: 750, category: "elektronika" },
-    { name: "Komputer (stacjonarny)", price: 850, category: "elektronika" },
-    { name: "Konsola", price: 500, category: "elektronika" },
-    { name: "Konsola DJ", price: 800, category: "elektronika" },
-    { name: "Kobieca plastikowa figurka", price: 120, category: "inne" },
-    { name: "Stara zapalniczka", price: 22, category: "inne" },
-    { name: "Plastikowa figurka małpki", price: 100, category: "inne" },
-    { name: "Kwiat", price: 80, category: "dom" },
-    { name: "Gitara elektryczna", price: 600, category: "elektronika" },
-    { name: "Dziwna substancja", price: 120, category: "inne" },
-    { name: "Dziwna szara substancja", price: 200, category: "inne" },
-    { name: "Biżuteria", price: 300, category: "biżuteria" },
-    { name: "Brudna biżuteria", price: 180, category: "biżuteria" },
-    { name: "Katana", price: 600, category: "inne" },
-    { name: "Mikrofala", price: 350, category: "dom" },
-    { name: "Mikser", price: 200, category: "dom" },
-    { name: "Monitor", price: 180, category: "elektronika" },
-    { name: "Obraz", price: 140, category: "dom" },
-    { name: "Obraz ścienny", price: 220, category: "dom" },
-    { name: "Głośnik", price: 180, category: "elektronika" },
-    { name: "Telewizor", price: 750, category: "elektronika" },
-    { name: "Zegarek", price: 200, category: "biżuteria" },
-    { name: "Stary popsuty telefon", price: 110, category: "elektronika" },
-    { name: "Sztabka złota", price: 15000, category: "inne" },
-    { name: "Złota moneta z prezydentem", price: 250, category: "inne" }
+    { name: "Zdobiona książka", price: 150, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/hr_book.webp", slots: 4, maxStack: 1 },
+    { name: "Dywan", price: 300, category: "dom", image: "https://img.realmgaming.eu/onbeat/items/hr_carpet.webp", slots: 4, maxStack: 1 },
+    { name: "Komputer (laptop)", price: 750, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/hr_computer.webp", slots: 4, maxStack: 1 },
+    { name: "Komputer (stacjonarny)", price: 850, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/hr_computer2.webp", slots: 4, maxStack: 1 },
+    { name: "Konsola", price: 500, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/hr_console.webp", slots: 4, maxStack: 1 },
+    { name: "Konsola DJ", price: 800, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/hr_djconsole.webp", slots: 4, maxStack: 1 },
+    { name: "Kobieca plastikowa figurka", price: 120, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/hr_figure.webp", slots: 4, maxStack: 1 },
+    { name: "Plastikowa figurka małpki", price: 100, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/hr_figure2.webp", slots: 4, maxStack: 1 },
+    { name: "Kwiat", price: 80, category: "dom", image: "https://img.realmgaming.eu/onbeat/items/hr_flower.webp", slots: 4, maxStack: 1 },
+    { name: "Gitara elektryczna", price: 600, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/hr_guitar.webp", slots: 4, maxStack: 1 },
+    { name: "Dziwna substancja", price: 120, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/hr_jerrycan.webp", slots: 4, maxStack: 1 },
+    { name: "Dziwna szara substancja", price: 200, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/hr_jerrycan2.webp", slots: 4, maxStack: 5 },
+    { name: "Biżuteria", price: 300, category: "biżuteria", image: "https://img.realmgaming.eu/onbeat/items/hr_jewelery.webp", slots: 1, maxStack: 1 },
+    { name: "Brudna biżuteria", price: 180, category: "biżuteria", image: "https://img.realmgaming.eu/onbeat/items/hr_jewelery.webp", slots: 1, maxStack: 1 },
+    { name: "Katana", price: 600, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/hr_katana.webp", slots: 4, maxStack: 1 },
+    { name: "Mikrofala", price: 350, category: "dom", image: "https://img.realmgaming.eu/onbeat/items/hr_microwave.webp", slots: 4, maxStack: 1 },
+    { name: "Mikser", price: 200, category: "dom", image: "https://img.realmgaming.eu/onbeat/items/hr_mixer.webp", slots: 4, maxStack: 1 },
+    { name: "Monitor", price: 180, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/hr_monitor.webp", slots: 4, maxStack: 1 },
+    { name: "Obraz", price: 140, category: "dom", image: "https://img.realmgaming.eu/onbeat/items/hr_painting.webp", slots: 4, maxStack: 1 },
+    { name: "Obraz ścienny", price: 220, category: "dom", image: "https://img.realmgaming.eu/onbeat/items/hr_paiting2.webp", slots: 4, maxStack: 1 },
+    { name: "Głośnik", price: 180, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/hr_speaker.webp", slots: 4, maxStack: 1 },
+    { name: "Telewizor", price: 750, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/hr_tv.webp", slots: 4, maxStack: 1 },
+    { name: "Zegarek", price: 200, category: "biżuteria", image: "https://img.realmgaming.eu/onbeat/items/hr_watch.webp", slots: 1, maxStack: 5 },
+    { name: "Zepsuty telefon", price: 110, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/brokenphone.webp", slots: 2, maxStack: 5 },
+    { name: "Sztabka złota", price: 15000, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/sztabka_zlota.webp", slots: 1, maxStack: 1 },
+    { name: "Złota moneta", price: 230, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/goldcoin.webp", slots: 1, maxStack: 20 },
+    { name: "Złota moneta z prezydentem", price: 250, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/prescoin42.webp", slots: 1, maxStack: 5 },
+    { name: "Muszle morskie", price: 108, category: "skarby", image: "https://img.realmgaming.eu/onbeat/items/pirates_shells.webp", slots: 2, maxStack: 5 },
+    { name: "Mała szara muszla", price: 84, category: "skarby", image: "https://img.realmgaming.eu/onbeat/items/pirates_seashell1.webp", slots: 1, maxStack: 10 },
+    { name: "Gwiazda morska", price: 72, category: "skarby", image: "https://img.realmgaming.eu/onbeat/items/pirates_star.webp", slots: 1, maxStack: 5 },
+    { name: "Ząb rekina", price: 96, category: "skarby", image: "https://img.realmgaming.eu/onbeat/items/pirates_sharktooth.webp", slots: 1, maxStack: 5 },
+    { name: "Stary płaszcz piracki", price: 240, category: "skarby", image: "https://img.realmgaming.eu/onbeat/items/pirates_coat.webp", slots: 6, maxStack: 5 },
+    { name: "Różowa perła", price: 420, category: "skarby", image: "https://img.realmgaming.eu/onbeat/items/pirates_pinkpearl.webp", slots: 1, maxStack: 5 },
+    { name: "Zniszczona flaga piratów", price: 240, category: "skarby", image: "https://img.realmgaming.eu/onbeat/items/pirates_flag.webp", slots: 2, maxStack: 5 },
+    { name: "Kapelusz piracki", price: 240, category: "skarby", image: "https://img.realmgaming.eu/onbeat/items/pirates_hat.webp", slots: 6, maxStack: 5 },
+    { name: "Szkatuła ze złotymi łańcuchami", price: 480, category: "skarby", image: "https://img.realmgaming.eu/onbeat/items/pirates_treasure.webp", slots: 6, maxStack: 5 },
+    { name: "Zabytkowa szabla", price: 420, category: "skarby", image: "https://img.realmgaming.eu/onbeat/items/pirates_saber.webp", slots: 2, maxStack: 5 },
+    { name: "Legendarna fajka", price: 480, category: "skarby", image: "https://img.realmgaming.eu/onbeat/items/pirates_pipe.webp", slots: 2, maxStack: 5 },
+    { name: "Zdobiona zapalniczka", price: 22, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/metallighter.webp", slots: 2, maxStack: 1 },
+    { name: "Złoty zegarek", price: 0, category: "biżuteria", image: "https://img.realmgaming.eu/onbeat/items/zloty_zegarek.webp", dynamicPrice: true, slots: 1, maxStack: 5 },
+    { name: "Dziwny telefon", price: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/trapphone.webp", dynamicPrice: true, slots: 2, maxStack: 5 },
+    { name: "Dziwna paczka", price: 0, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/podejrzana_paczka.webp", dynamicPrice: true, slots: 6, maxStack: 20 },
+    { name: "Dziwny pendrive", price: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/pendrive.webp", dynamicPrice: true, slots: 1, maxStack: 5 },
+    { name: "Zielony pendrive", price: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/pendrive_zielony.webp", dynamicPrice: true, slots: 1, maxStack: 5 },
+    { name: "Prymitywny wkład do kamizelki", price: 0, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/armor_25.webp", dynamicPrice: true, slots: 4, maxStack: 20 },
+    { name: "Wytrych", price: 0, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/lockpick.webp", dynamicPrice: true, slots: 2, maxStack: 2 },
+    { name: "Tablet G6420", price: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/tablet_green.webp", dynamicPrice: true, slots: 1, maxStack: 1 },
+    { name: "Sprężyna", price: 0, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/spring.webp", dynamicPrice: true, slots: 4, maxStack: 5 },
+    { name: "Śmieci elektroniczne", price: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/electrotrash.webp", dynamicPrice: true, slots: 4, maxStack: 3 },
+    { name: "Moduł do telefonu", price: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/modul_telefoniczny.webp", dynamicPrice: true, slots: 2, maxStack: 5 },
+    { name: "Elementy do laptopa", price: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/elementy_do_laptopa.webp", dynamicPrice: true, slots: 4, maxStack: 5 },
+    { name: "Krótkofalówka", price: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/radio.webp", dynamicPrice: true, slots: 2, maxStack: 1 },
+    { name: "Legitymacja Bobcat - Niko Bellic", price: 0, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/bobcat_entrance.webp", dynamicPrice: true, slots: 1, maxStack: 5 },
+    { name: "Dekoder do alarmu", price: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/dekoder_house.webp", dynamicPrice: true, slots: 2, maxStack: 5 },
+    { name: "Dekoder do pojazdu", price: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/decoder_car.webp", dynamicPrice: true, slots: 2, maxStack: 5 },
+    { name: "Radio samochodowe", price: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/car_radio.webp", dynamicPrice: true, slots: 2, maxStack: 5 },
+    { name: "Antena", price: 0, category: "elektronika", image: "https://img.realmgaming.eu/onbeat/items/antena.webp", dynamicPrice: true, slots: 1, maxStack: 5 },
+    { name: "Zardzewiała blacha", price: 0, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/zardzewialy_metal.webp", dynamicPrice: true, slots: 1, maxStack: 5 },
+    { name: "Cygaro Havana", price: 0, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/cygaro_havana.webp", dynamicPrice: true, slots: 1, maxStack: 5 },
+    { name: "Butelka rumu pirackiego", price: 0, category: "inne", image: "https://img.realmgaming.eu/onbeat/items/rum_piracki.webp", dynamicPrice: true, slots: 2, maxStack: 1 }
 ];
 
 let exportInventory = [];
@@ -118,9 +290,6 @@ let currentTotalExport = 0;
 let lastGeneratedReportID = ""; 
 let currentCustomerSSNExport = "";
 
-// ==========================================
-// FUNKCJE POMOCNICZE (DATY, ID)
-// ==========================================
 function getFormattedDate() {
     const now = new Date();
     const day = String(now.getDate()).padStart(2, '0');
@@ -165,6 +334,9 @@ function generateID() {
     return res;
 }
 
+// ==========================================================================
+// OBSŁUGA SCROLLA (ZWIJANIE NAVBARA I ZAMYKANIE MENU PROFILU)
+// ==========================================================================
 document.addEventListener('scroll', function() {
     const navbar = document.querySelector('.navbar');
     if (window.scrollY > 50) {
@@ -172,46 +344,97 @@ document.addEventListener('scroll', function() {
     } else {
         navbar.classList.remove('scrolled');
     }
+
+    // Automatycznie zamyka rozwijane menu profilu, gdy tylko zaczniesz scrollować
+    const userDropdown = document.getElementById('user-dropdown');
+    if (userDropdown && userDropdown.classList.contains('active')) {
+        userDropdown.classList.remove('active');
+    }
 });
 
-// ==========================================
-// SYSTEM PRZEŁĄCZANIA WIDOKÓW (SPA)
-// ==========================================
+// =========================================================
+// WIRTUALNY MAGAZYN
+// =========================================================
+
+// Konfiguracja Wirtualnego Magazynu
+const MAX_WAREHOUSE_SLOTS = 3393;
+let virtualWarehouse = {};
+
+function getItemSlotSize(itemName) {
+    // Szukamy przedmiotu po nazwie w głównej bazie ekwipunku
+    const foundItem = defaultInventory.find(item => item.name === itemName);
+    
+    // Jeśli znajdzie przedmiot i ma on wpisany parametr "slots", zwraca go. 
+    // W przeciwnym razie domyślnie zwraca 1.
+    return (foundItem && foundItem.slots) ? foundItem.slots : 1;
+}
+
+function getItemMaxStack(itemName) {
+    const foundItem = defaultInventory.find(item => item.name === itemName);
+    // Jeśli przedmiot ma parametr maxStack to go zwraca. Domyślnie wynosi 1 (nie stackuje się).
+    return (foundItem && foundItem.maxStack) ? foundItem.maxStack : 1;
+}
+
+// ==========================================================================
+// ZAMYKANIE MENU PROFILU PO KLIKNIĘCIU W TŁO (POZA MENU)
+// ==========================================================================
+document.addEventListener('click', function(event) {
+    const userDropdown = document.getElementById('user-dropdown');
+    
+    // Uruchamiamy sprawdzanie tylko, jeśli menu jest aktualnie otwarte
+    if (userDropdown && userDropdown.classList.contains('active')) {
+        // Sprawdzamy czy kliknięto wewnątrz samego menu (żeby się nie zamknęło jak klikasz opcję)
+        const isClickInsideMenu = userDropdown.contains(event.target);
+        // Sprawdzamy czy kliknięto w przycisk otwierający profil
+        const isClickOnToggleBtn = event.target.closest('#profile-toggle-btn');
+        
+        // Jeśli kliknięto gdzieś w tło okna przeglądarki - zamknij menu
+        if (!isClickInsideMenu && !isClickOnToggleBtn) {
+            userDropdown.classList.remove('active');
+        }
+    }
+});
+
 window.switchView = function(view) {
     if (!currentEmployeeName && document.getElementById('login-screen').classList.contains('active')) {
         return; 
     }
-
+    
     currentActiveView = view;
     const themeStyle = document.getElementById('theme-style');
-    
     const viewSkup = document.getElementById('view-skup');
     const viewExport = document.getElementById('view-export');
+    const viewLoyalty = document.getElementById('view-loyalty');
     const navLogoIcon = document.getElementById('nav-logo-icon');
 
     if (view === 'skup') {
         if(themeStyle) themeStyle.href = `style.css?v=${APP_VERSION}`;
-        viewSkup.style.display = 'block';
-        viewExport.style.display = 'none';
+        if(viewSkup) viewSkup.classList.remove('hidden');
+        if(viewExport) viewExport.classList.add('hidden');
+        if(viewLoyalty) viewLoyalty.classList.add('hidden');
         navLogoIcon.className = 'fas fa-cash-register';
         document.querySelector('.navbar').classList.remove('scrolled'); 
     } else if (view === 'export') {
         if(themeStyle) themeStyle.href = `style-sprzedaz.css?v=${APP_VERSION}`;
-        viewSkup.style.display = 'none';
-        viewExport.style.display = 'block';
+        if(viewSkup) viewSkup.classList.add('hidden');
+        if(viewExport) viewExport.classList.remove('hidden');
+        if(viewLoyalty) viewLoyalty.classList.add('hidden');
         navLogoIcon.className = 'fas fa-box-open';
+        document.querySelector('.navbar').classList.remove('scrolled'); 
+    } else if (view === 'loyalty') {
+        if(viewSkup) viewSkup.classList.add('hidden');
+        if(viewExport) viewExport.classList.add('hidden');
+        if(viewLoyalty) viewLoyalty.classList.remove('hidden');
+        navLogoIcon.className = 'fas fa-id-card';
         document.querySelector('.navbar').classList.remove('scrolled'); 
     }
     
     document.getElementById('user-dropdown').classList.remove('active');
 }
 
-// ==========================================
-// SYSTEM LOGOWANIA
-// ==========================================
 window.login = async function() {
     const pin = document.getElementById('employee-login-pin').value;
-    const btn = document.getElementById('login-btn');
+    const btn = document.getElementById('login-btn-action');
     if (!pin) return showNotice("Wprowadź PIN!", "danger");
 
     btn.disabled = true;
@@ -222,16 +445,65 @@ window.login = async function() {
         const data = await response.json();
 
         if (data.isValid) {
+            window.mySessionStart = new Date().getTime();
             currentEmployeeName = data.name;
             currentEmployeeRank = data.rank || "Pracownik"; 
-            currentEmployeeSsn = data.ssn || "---"; 
-            currentEmployeeDateZatrudnienia = data.dateZatrudnienia || "Brak danych";
+            
+            // TWARDE PRZYPISANIE SSN I DATY
+            currentEmployeeSsn = data.ssn && data.ssn !== "" ? String(data.ssn) : "---"; 
+            currentEmployeeDateZatrudnienia = data.dateZatrudnienia && data.dateZatrudnienia !== "" ? String(data.dateZatrudnienia) : "Brak danych";
+            
             currentEmployeePhoto = data.photo || ""; 
+
+            // --- SYSTEM ZAPAMIĘTYWANIA PROFILU ---
+            const rememberMeCheckbox = document.getElementById('remember-me-checkbox');
+            if (rememberMeCheckbox && rememberMeCheckbox.checked) {
+                let savedProfiles = JSON.parse(localStorage.getItem('elcartel_saved_profiles') || '[]');
+                savedProfiles = savedProfiles.filter(p => p.name !== currentEmployeeName);
+                savedProfiles.push({ 
+                    name: currentEmployeeName, 
+                    pin: pin, 
+                    photo: currentEmployeePhoto || '',
+                    ssn: currentEmployeeSsn || '---',
+                    dateZatrudnienia: currentEmployeeDateZatrudnienia || 'Brak danych',
+                    rank: currentEmployeeRank || 'Pracownik' // <--- TUTAJ DODALIŚMY STOPIEŃ
+                });
+                localStorage.setItem('elcartel_saved_profiles', JSON.stringify(savedProfiles));
+                if (typeof renderSavedProfiles === 'function') renderSavedProfiles();
+            }
+            // ------------------------------------		
             
             const adminChangelogBtn = document.getElementById('admin-changelog-btn');
             const adminReportsBtn = document.getElementById('admin-reports-btn');
-            if (adminChangelogBtn) adminChangelogBtn.style.display = isTravisVance() ? 'flex' : 'none';
-            if (adminReportsBtn) adminReportsBtn.style.display = isTravisVance() ? 'flex' : 'none';
+            const adminReloadBtn = document.getElementById('admin-force-reload-btn');
+
+            if (adminChangelogBtn) {
+                if(isTravisVance() || currentEmployeeSsn === "4") adminChangelogBtn.classList.remove('hidden');
+                else adminChangelogBtn.classList.add('hidden');
+            }
+            if (adminReportsBtn) {
+                if(isTravisVance() || currentEmployeeSsn === "4") adminReportsBtn.classList.remove('hidden');
+                else adminReportsBtn.classList.add('hidden');
+            }
+            if (adminReloadBtn) {
+                if(isTravisVance() || currentEmployeeSsn === "4") adminReloadBtn.classList.remove('hidden');
+                else adminReloadBtn.classList.add('hidden');
+            }
+
+            // PAGER - Logika uprawnień po SSN
+            const menuPagerBtn = document.getElementById('menu-pager');
+            if (menuPagerBtn) {
+                if(currentEmployeeSsn === "4") {
+                    menuPagerBtn.classList.remove('hidden');
+                } else {
+                    menuPagerBtn.classList.add('hidden');
+                }
+            }
+
+            const loyaltyBtn = document.getElementById('loyalty-floating-btn');
+            if (loyaltyBtn) {
+                loyaltyBtn.classList.remove('hidden');
+            }
 
             document.getElementById('logged-user-name').innerText = currentEmployeeName.toUpperCase();
             document.getElementById('dropdown-user-name').innerText = currentEmployeeName;
@@ -244,107 +516,366 @@ window.login = async function() {
 
             if (currentEmployeePhoto && currentEmployeePhoto !== "") {
                 navAvatar.src = currentEmployeePhoto;
-                navAvatar.style.display = 'block';
-                navDefaultIcon.style.display = 'none';
+                navAvatar.classList.remove('hidden');
+                navDefaultIcon.classList.add('hidden');
                 
                 dropAvatar.src = currentEmployeePhoto;
-                dropAvatar.style.display = 'block';
-                dropDefaultIcon.style.display = 'none';
+                dropAvatar.classList.remove('hidden');
+                dropDefaultIcon.classList.add('hidden');
             } else {
-                navAvatar.style.display = 'none';
-                navDefaultIcon.style.display = 'block';
+                navAvatar.classList.add('hidden');
+                navDefaultIcon.classList.remove('hidden');
                 
-                dropAvatar.style.display = 'none';
-                dropDefaultIcon.style.display = 'block';
+                dropAvatar.classList.add('hidden');
+                dropDefaultIcon.classList.remove('hidden');
             }
 
-            document.getElementById('login-screen').classList.remove('active');
-            document.getElementById('main-app').style.display = 'block';
-            document.getElementById('user-profile').style.display = 'block';
-            
-            const banner = document.getElementById('announcement-banner');
-            if(banner) banner.style.display = 'flex';
+            // --- EFEKT FACE ID (otwieranie kłódki) ---
+            const mainIcon = document.querySelector('.login-icon');
+            if (mainIcon) {
+                mainIcon.classList.remove('fa-lock', 'fa-user-lock');
+                mainIcon.classList.add('fa-unlock', 'icon-unlock-anim');
+            }
 
-            showNotice(`Rozpoczęto zmianę: ${data.name}`, "success");
-            
-            initSkup();
-            initExport();
-            fetchChangelogData();
-            
-            switchView('skup');
+            setTimeout(() => {
+                const loginCard = document.querySelector('.login-card');
+                loginCard.classList.add('login-zoom-in');
+                
+                setTimeout(() => {
+                    document.getElementById('login-screen').classList.remove('active');
+                    loginCard.classList.remove('login-zoom-in');
+                    btn.disabled = false;
+                    btn.innerHTML = 'Odblokuj system <i class="fas fa-unlock"></i>';
+                    
+                    const mainApp = document.getElementById('main-app');
+                    mainApp.classList.remove('hidden');
+                    mainApp.classList.add('app-zoom-out');
+                    
+                    document.getElementById('user-profile').classList.remove('hidden');
+                    
+                    const banner = document.getElementById('announcement-banner');
+                    if(banner) banner.classList.remove('hidden');
 
-        } else {
+                    window.addSystemLog('LOGOWANIE', `Pracownik zalogował się do systemu (Wersja: ${APP_VERSION}).`);
+
+                    showNotice(`Rozpoczęto zmianę: ${data.name}`, "success");
+                    
+                    initSkup();
+                    initExport();
+                    fetchChangelogData();
+                    switchView('skup');
+                    checkEmployeeBonuses();
+
+                    // =====================================================================
+                    // WYWOŁANIE SAMOUCZKA PO ZALOGOWANIU
+                    // =====================================================================
+                    if (!localStorage.getItem('elcartel_tutorial_seen')) {
+                        setTimeout(() => {
+                            window.startTutorial();
+                        }, 1000); 
+                    }
+                    // =====================================================================
+
+                    fetch(`${PIN_API_URL}?action=get_all`)
+                        .then(res => res.json())
+                        .then(d => { 
+                            if(d.employees) window.currentEmployeesList = d.employees; 
+                            updateOnlineEmployees(); 
+                        })
+                        .catch(e => console.error(e));
+                    
+                    onlineCheckInterval = setInterval(updateOnlineEmployees, 60000);
+                    
+                    setTimeout(() => { mainApp.classList.remove('app-zoom-out'); }, 600);
+                }, 400);
+
+            }, 600);
+
+       } else {
             showNotice("Nieprawidłowy PIN!", "danger");
+            window.addSystemLog('BŁĘDNY PIN', `Niewłaściwa próba autoryzacji do systemu (Użyto niepoprawnego kodu PIN w index.html).`);
+            btn.disabled = false;
+            btn.innerHTML = 'Odblokuj system <i class="fas fa-unlock"></i>';
+
+            // --- EFEKT BŁĘDNEGO PINU (trzęsienie kłódki) ---
+            const mainIcon = document.querySelector('.login-icon');
+            if (mainIcon) {
+                mainIcon.classList.add('icon-shake-anim');
+                
+                setTimeout(() => {
+                    mainIcon.classList.remove('icon-shake-anim');
+                }, 400);
+            }
         }
     } catch (error) {
         showNotice("Błąd połączenia z bazą PIN!", "danger");
         console.error(error);
-    } finally {
         btn.disabled = false;
         btn.innerHTML = 'Odblokuj system <i class="fas fa-unlock"></i>';
     }
 }
 
 window.logout = function() {
-    currentEmployeeName = "";
-    currentEmployeeRank = "Pracownik";
-    currentEmployeeSsn = "---";
-    currentEmployeeDateZatrudnienia = "---";
-    currentEmployeePhoto = ""; 
-    document.getElementById('employee-login-pin').value = "";
-    document.getElementById('logged-user-name').innerText = "---";
-    document.getElementById('dropdown-user-name').innerText = "---";
-    document.getElementById('dropdown-user-rank').innerText = "---";
-    
-    const navAvatar = document.getElementById('nav-user-avatar');
-    const navDefaultIcon = document.getElementById('nav-user-default-icon');
-    const dropAvatar = document.getElementById('dropdown-user-avatar');
-    const dropDefaultIcon = document.getElementById('dropdown-user-default-icon');
-    
-    if(navAvatar) navAvatar.style.display = 'none';
-    if(navDefaultIcon) navDefaultIcon.style.display = 'block';
-    if(dropAvatar) dropAvatar.style.display = 'none';
-    if(dropDefaultIcon) dropDefaultIcon.style.display = 'block';
+    window.addSystemLog('WYLOGOWANIE', `Pracownik zakończył zmianę i wylogował się.`);
+    const mainApp = document.getElementById('main-app');
+    const loginScreen = document.getElementById('login-screen');
+    const loginCard = document.querySelector('.login-card');
+    const mainIcon = document.querySelector('.login-icon');
 
-    document.getElementById('login-screen').classList.add('active');
-    
-    document.getElementById('main-app').style.display = 'none';
-    document.getElementById('user-profile').style.display = 'none';
     document.getElementById('user-dropdown').classList.remove('active');
-    
-    const adminChangelogBtn = document.getElementById('admin-changelog-btn');
-    const adminReportsBtn = document.getElementById('admin-reports-btn');
-    if(adminChangelogBtn) adminChangelogBtn.style.display = 'none';
-    if(adminReportsBtn) adminReportsBtn.style.display = 'none';
-    
+    document.getElementById('user-profile').classList.add('hidden');
     const banner = document.getElementById('announcement-banner');
-    if(banner) banner.style.display = 'none';
+    if(banner) banner.classList.add('hidden');
 
-    const clContainer = document.getElementById('dynamic-changelog-container');
-    if (clContainer) clContainer.innerHTML = '';
+    mainApp.classList.remove('app-zoom-out');
+    mainApp.classList.add('app-zoom-in');
 
-    resetCartAndInventory();
-    resetCartAndInventoryExport();
-    
-    showNotice("Zakończono zmianę. Wylogowano.", "info");
+    setTimeout(() => {
+        mainApp.classList.add('hidden');
+        mainApp.classList.remove('app-zoom-in');
+
+        loginScreen.classList.add('active');
+        loginCard.classList.add('login-zoom-out');
+
+        if (mainIcon) {
+            mainIcon.className = 'fas fa-unlock login-icon';
+            setTimeout(() => {
+                mainIcon.className = 'fas fa-lock login-icon icon-lock-anim';
+                setTimeout(() => mainIcon.classList.remove('icon-lock-anim'), 500);
+            }, 550);
+        }
+
+        currentEmployeeName = "";
+        currentEmployeeRank = "Pracownik";
+        currentEmployeeSsn = "---";
+        currentEmployeeDateZatrudnienia = "---";
+        currentEmployeePhoto = ""; 
+        document.getElementById('employee-login-pin').value = "";
+        document.getElementById('logged-user-name').innerText = "---";
+        document.getElementById('dropdown-user-name').innerText = "---";
+        document.getElementById('dropdown-user-rank').innerText = "---";
+        
+        const navAvatar = document.getElementById('nav-user-avatar');
+        const navDefaultIcon = document.getElementById('nav-user-default-icon');
+        const dropAvatar = document.getElementById('dropdown-user-avatar');
+        const dropDefaultIcon = document.getElementById('dropdown-user-default-icon');
+        
+        if(navAvatar) navAvatar.classList.add('hidden');
+        if(navDefaultIcon) navDefaultIcon.classList.remove('hidden');
+        if(dropAvatar) dropAvatar.classList.add('hidden');
+        if(dropDefaultIcon) dropDefaultIcon.classList.remove('hidden');
+
+        const adminChangelogBtn = document.getElementById('admin-changelog-btn');
+        const adminReportsBtn = document.getElementById('admin-reports-btn');
+        const pagerBtn = document.getElementById('menu-pager');
+        
+        if(adminChangelogBtn) adminChangelogBtn.classList.add('hidden');
+        if(adminReportsBtn) adminReportsBtn.classList.add('hidden');
+        if(pagerBtn) pagerBtn.classList.add('hidden');
+        if(document.getElementById('admin-force-reload-btn')) document.getElementById('admin-force-reload-btn').classList.add('hidden');
+
+        const loyaltyBtn = document.getElementById('loyalty-floating-btn');
+        if (loyaltyBtn) loyaltyBtn.classList.add('hidden');
+
+        const clContainer = document.getElementById('dynamic-changelog-container');
+        if (clContainer) clContainer.innerHTML = '';
+
+        resetCartAndInventory();
+        resetCartAndInventoryExport();
+        
+        clearInterval(onlineCheckInterval);
+        const widget = document.getElementById('online-employees-widget');
+        if (widget) widget.classList.add('hidden');
+
+        setTimeout(() => loginCard.classList.remove('login-zoom-out'), 450);
+        showNotice("Zakończono zmianę. Wylogowano.", "info");
+    }, 400);
 }
+
+// ==========================================
+// SYSTEM COFANIA (UNDO) DLA KOSZYKÓW
+// ==========================================
+window.undoStateSkup = null;
+window.undoStateExport = null;
+
+window.clearCartWithUndo = function() {
+    // 1. Zapisujemy obecny stan koszyka
+    window.undoStateSkup = {
+        inventory: JSON.parse(JSON.stringify(inventory)),
+        counts: JSON.parse(JSON.stringify(counts)),
+        ssn: document.getElementById('customer-ssn-input') ? document.getElementById('customer-ssn-input').value : "",
+        price: document.getElementById('final-price-input') ? document.getElementById('final-price-input').value : ""
+    };
+    
+    // 2. Standardowo czyścimy
+    resetCartAndInventory();
+    
+    // 3. Wyświetlamy powiadomienie z opcją cofnięcia
+    showUndoNotice('skup');
+};
+
+window.clearCartExportWithUndo = function() {
+    window.undoStateExport = {
+        exportInventory: JSON.parse(JSON.stringify(exportInventory)),
+        countsExport: JSON.parse(JSON.stringify(countsExport)),
+        ssn: document.getElementById('customer-ssn-input-export') ? document.getElementById('customer-ssn-input-export').value : ""
+    };
+    
+    resetCartAndInventoryExport();
+    showUndoNotice('export');
+};
+
+window.restoreCart = function() {
+    if (!window.undoStateSkup) return;
+    
+    // 1. Przywracamy dane z pamięci
+    inventory = JSON.parse(JSON.stringify(window.undoStateSkup.inventory));
+    counts = JSON.parse(JSON.stringify(window.undoStateSkup.counts));
+    
+    const ssnInput = document.getElementById('customer-ssn-input');
+    if(ssnInput) ssnInput.value = window.undoStateSkup.ssn;
+    currentCustomerSSN = window.undoStateSkup.ssn;
+
+    const priceInput = document.getElementById('final-price-input');
+    if(priceInput) priceInput.value = window.undoStateSkup.price;
+    
+    // 2. Czyścimy pamięć i odświeżamy widok
+    window.undoStateSkup = null;
+    renderInventory();
+    calculateTotal();
+    
+    // 3. Zamykamy powiadomienie ratunkowe
+    const activeUndo = document.getElementById('undo-toast-skup');
+    if(activeUndo) activeUndo.remove();
+    
+    showNotice("Przywrócono wyczyszczony koszyk!", "success");
+};
+
+window.restoreCartExport = function() {
+    if (!window.undoStateExport) return;
+    
+    exportInventory = JSON.parse(JSON.stringify(window.undoStateExport.exportInventory));
+    countsExport = JSON.parse(JSON.stringify(window.undoStateExport.countsExport));
+    
+    const ssnInput = document.getElementById('customer-ssn-input-export');
+    if(ssnInput) ssnInput.value = window.undoStateExport.ssn;
+    currentCustomerSSNExport = window.undoStateExport.ssn;
+    
+    window.undoStateExport = null;
+    renderInventoryExport();
+    calculateTotalExport();
+    
+    const activeUndo = document.getElementById('undo-toast-export');
+    if(activeUndo) activeUndo.remove();
+    
+    showNotice("Przywrócono wyczyszczoną listę!", "success");
+};
+
+window.showUndoNotice = function(type) {
+    const container = document.getElementById('toast-container');
+    if(!container) return;
+    
+    // Usuń poprzednie powiadomienie tego typu, żeby nie spamować ekranu
+    const existing = document.getElementById(`undo-toast-${type}`);
+    if(existing) existing.remove();
+
+    const duration = 15000; // 15 sekund na reakcję
+    const t = document.createElement('div');
+    t.className = `toast warning`;
+    t.id = `undo-toast-${type}`;
+    t.style.display = 'flex';
+    t.style.flexDirection = 'column';
+    t.style.alignItems = 'flex-start';
+    t.style.gap = '10px';
+    t.style.paddingRight = '25px';
+
+    const msg = type === 'skup' ? "Koszyk skupu został wyczyszczony." : "Lista sprzedaży została wyczyszczona.";
+    const onClickFunc = type === 'skup' ? "window.restoreCart()" : "window.restoreCartExport()";
+
+    // Wstrzykujemy własny przycisk do standardowego powiadomienia
+    t.innerHTML = `
+        <div style="font-weight: 600;">${msg}</div>
+        <button onclick="${onClickFunc}" style="background: var(--card-bg); border: 1px solid var(--warning); color: var(--warning); padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; font-size: 0.85rem; display: flex; align-items: center; gap: 6px; width: 100%; justify-content: center;" onmouseover="this.style.background='var(--warning)'; this.style.color='#fff';" onmouseout="this.style.background='var(--card-bg)'; this.style.color='var(--warning)';">
+            <i class="fas fa-undo"></i> Przywróć koszyk
+        </button>
+    `;
+    
+    const progress = document.createElement('div');
+    progress.className = 'toast-progress';
+    progress.style.animationDuration = `${duration}ms`;
+    t.appendChild(progress);
+    
+    container.appendChild(t);
+    window.playSystemSound('warning'); // Ostrzegawczy dźwięk przy czyszczeniu
+    
+    // Automatyczne usuwanie po 15 sekundach
+    setTimeout(() => { 
+        if (document.body.contains(t)) {
+            t.style.opacity = '0'; 
+            setTimeout(() => t.remove(), 300); 
+            if (type === 'skup') window.undoStateSkup = null;
+            if (type === 'export') window.undoStateExport = null;
+        }
+    }, duration);
+};
 
 window.toggleUserMenu = function() {
     document.getElementById('user-dropdown').classList.toggle('active');
 }
 
-document.addEventListener('click', function(event) {
-    const profile = document.getElementById('user-profile');
-    const dropdown = document.getElementById('user-dropdown');
-    if (profile && dropdown && !profile.contains(event.target)) {
-        dropdown.classList.remove('active');
+async function checkEmployeeBonuses() {
+    try {
+        const res = await window.preloadBonusesData();
+        const data = res;
+        
+        if (data.bonuses && data.bonuses.length > 0) {
+            const myUnreadBonuses = data.bonuses.filter(b => b.employee === currentEmployeeName && b.status === "Nieodebrane");
+            
+            if (myUnreadBonuses.length > 0) {
+                let totalBonus = 0;
+                let detailsHtml = "";
+                
+                myUnreadBonuses.forEach(b => {
+                    totalBonus += parseFloat(b.amount) || 0;
+                    detailsHtml += `
+                        <div class="bonus-detail-row">
+                            <span class="bonus-detail-from">
+                                <strong class="bonus-detail-boss">Od: ${b.boss}</strong><br>
+                                <small>${b.reason}</small>
+                            </span>
+                            <strong class="bonus-detail-amount">+${window.formatMoney(b.amount)}$</strong>
+                        </div>
+                    `;
+                });
+
+                document.getElementById('bonus-notification-details').innerHTML = `
+                    <div class="bonus-total-summary">
+                        +${window.formatMoney(totalBonus)}$
+                    </div>
+                    <div class="bonus-list-wrapper">
+                        ${detailsHtml}
+                    </div>
+                `;
+                document.getElementById('bonus-notification-modal').classList.add('active');
+
+                fetch(REPORTS_API_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        action: 'mark_bonus_read',
+                        employee: currentEmployeeName
+                    })
+                }).catch(e => console.error("Błąd oznaczania", e));
+            }
+        }
+    } catch (e) {
+        console.error("Błąd premii:", e);
     }
-});
+}
 
+window.closeBonusNotification = function() {
+    document.getElementById('bonus-notification-modal').classList.remove('active');
+}
 
-// ==========================================
-// LOKALNE STATYSTYKI SKUPU
-// ==========================================
 function getDailyStat(employeeName) {
     const date = getFormattedDate();
     const key = `elcartel_stats_${employeeName}_${date}`;
@@ -358,25 +889,25 @@ function addDailyStat(employeeName, amount) {
     localStorage.setItem(key, current + amount);
 }
 
-// ==========================================
-// LOGIKA - SKUP (KASA)
-// ==========================================
 function initSkup() {
     document.getElementById('header-date').innerText = getFormattedDate();
-    resetCartAndInventory();
+    
+    // Odpalamy nowy system zakładek!
+    initTabs(); 
     
     const adInput = document.getElementById('ad-input');
-    if(adInput) {
-        adInput.addEventListener('input', updateAdPreview);
-        updateAdPreview();
-    }
+    if(adInput) updateAdPreview();
     updateCartView(); 
+    
+    // Czeka na dane o trendach z Google i odświeża widok Skupu, żeby strzałki wskoczyły natychmiast
+    updateProductTrends().then(() => renderInventory());
+	
+	window.updateTimeBasedGreeting();
 }
 
 function resetCartAndInventory() {
     inventory = JSON.parse(JSON.stringify(defaultInventory));
     counts = {};
-    
     inventory.forEach((_, index) => { counts[index] = 0; });
 
     const finalPriceInput = document.getElementById('final-price-input');
@@ -386,8 +917,15 @@ function resetCartAndInventory() {
     if (ssnInput) ssnInput.value = "";
     currentCustomerSSN = "";
 
+    // --- INTELIGENTNY RESET NAZWY ---
+    if (window.skupTabs && window.activeSkupTabId) {
+        const tab = window.skupTabs.find(t => t.id === window.activeSkupTabId);
+        if (tab) tab.name = window.getFreeClientName(window.skupTabs, tab.id);
+    }
+
     renderInventory();
     calculateTotal();
+    if (typeof window.renderTabsUI === 'function') window.renderTabsUI(); 
 }
 
 function renderInventory() {
@@ -400,36 +938,70 @@ function renderInventory() {
 
     inventory.forEach((item, index) => {
         if(counts[index] === undefined) counts[index] = 0;
-        
         const card = document.createElement('div');
-        card.className = 'item-card';
+        let cardClass = showImagesSkup ? 'item-card show-images' : 'item-card';
         card.setAttribute('data-category', item.category);
         card.setAttribute('data-name', item.name.toLowerCase());
         
         if (item.isCustom) {
-            card.classList.add('custom-card-special');
+            card.className = cardClass + ' custom-card-special';
             card.innerHTML = `
-                <div class="item-info" style="width: 60%;">
-                    <input type="text" id="custom-name-${index}" class="custom-item-name" placeholder="Wpisz nazwę..." value="${item.name === 'Własny przedmiot' ? '' : item.name}" oninput="updateCustomName(${index}, this.value)">
-                    <input type="number" id="custom-price-${index}" class="custom-item-price" placeholder="Cena $" min="0" value="${item.min > 0 ? item.min : ''}" oninput="updateCustomPrice(${index}, this.value)">
+                <div class="item-left-side">
+                    <button onclick="removeCustomItemSlot(${index})" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.15); color: var(--danger); cursor: pointer; flex-shrink: 0; display: flex; justify-content: center; align-items: center; transition: 0.2s;" title="Usuń pole" onmouseover="this.style.background='var(--danger)'; this.style.color='#fff';" onmouseout="this.style.background='rgba(239, 68, 68, 0.15)'; this.style.color='var(--danger)';"><i class="fas fa-trash"></i></button>
+                    <div class="item-info custom-inputs-wrapper" style="margin-right:0;">
+                        <input type="text" class="custom-item-name" data-index="${index}" placeholder="Wpisz nazwę..." value="${item.name === 'Własny przedmiot' ? '' : item.name}">
+                        <input type="number" class="custom-item-price" data-index="${index}" placeholder="Cena $" min="0" value="${item.min > 0 ? item.min : ''}">
+                    </div>
                 </div>
                 <div class="controls">
-                    <button class="btn-circle minus" onclick="updateCount(${index}, -1)">-</button>
-                    <input type="number" id="count-${index}" class="quantity-input" value="${counts[index]}" min="0" oninput="handleInput(${index}, this.value)">
-                    <button class="btn-circle plus" onclick="updateCount(${index}, 1)">+</button>
+                    <button class="btn-circle minus" data-action="minus" data-index="${index}">-</button>
+                    <input type="number" class="quantity-input" data-index="${index}" value="${counts[index]}" min="0">
+                    <button class="btn-circle plus" data-action="add" data-index="${index}">+</button>
                 </div>
             `;
             customCards.push(card);
-        } else {
+} else {
+            card.className = cardClass;
+            
+            let trendHtml = '';
+            const nameLow = String(item.name).toLowerCase().trim();
+            const trend = window.productTrendsSkup ? window.productTrendsSkup[nameLow] : null;
+
+            if (trend === 'up') {
+                trendHtml = `<span title="Znaczny wzrost skupu w ostatnich 3 dniach." style="background: rgba(34, 197, 94, 0.15); border: 1px solid rgba(34, 197, 94, 0.3); color: var(--success); padding: 2px 8px; border-radius: 6px; font-size: 0.8rem; cursor: help; display: inline-flex; align-items: center;"><i class="fas fa-arrow-trend-up"></i></span>`;
+            } else if (trend === 'down') {
+                trendHtml = `<span title="Zainteresowanie spada. Skupujecie tego mniej niż 3 dni temu." style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: var(--danger); padding: 2px 8px; border-radius: 6px; font-size: 0.8rem; cursor: help; display: inline-flex; align-items: center;"><i class="fas fa-arrow-trend-down"></i></span>`;
+            } else if (trend === 'neutral') {
+                trendHtml = `<span title="Rynek stabilny. Skup idzie tak samo jak kilka dni temu." style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); color: var(--text-secondary); padding: 2px 8px; border-radius: 6px; font-size: 0.8rem; cursor: help; display: inline-flex; align-items: center;"><i class="fas fa-minus"></i></span>`;
+            } else {
+                trendHtml = `<span title="Brak wystarczających danych z ostatnich 6 dni." style="background: transparent; border: 1px dashed rgba(255, 255, 255, 0.2); color: var(--text-secondary); padding: 2px 8px; border-radius: 6px; font-size: 0.8rem; cursor: help; opacity: 0.5; display: inline-flex; align-items: center;"><i class="fas fa-minus"></i></span>`;
+            }
+
+            let priceText = item.min === item.max ? item.min + '$' : item.min + '$ - ' + item.max + '$';
+            let imageHtml = item.image ? `<img src="${item.image}" class="item-image" alt="">` : `<i class="fas fa-box-open item-icon"></i>`;
+            
+            let priceElementHtml = '';
+            if (item.dynamicPrice) {
+                priceElementHtml = `<input type="number" class="custom-item-price" data-index="${index}" placeholder="Cena $" min="0" value="${item.min > 0 ? item.min : ''}" style="width: 80px; padding: 4px 8px; border-radius: 8px; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); color: var(--accent-color); font-weight: 700; outline: none;">`;
+            } else {
+                priceElementHtml = `<span class="item-price">${priceText}</span>`;
+            }
+
             card.innerHTML = `
-                <div class="item-info">
-                    <span class="item-name">${item.name}</span>
-                    <span class="item-price">${item.min === item.max ? item.min + '$' : item.min + '$ - ' + item.max + '$'}</span>
+                <div class="item-left-side">
+                    ${imageHtml}
+                    <div class="item-info">
+                        <span class="item-name">${item.name}</span>
+                        <div style="display: flex; align-items: center; gap: 8px; margin-top: 2px;">
+                            ${priceElementHtml}
+							${trendHtml}
+                        </div>
+                    </div>
                 </div>
                 <div class="controls">
-                    <button class="btn-circle minus" onclick="updateCount(${index}, -1)">-</button>
-                    <input type="number" id="count-${index}" class="quantity-input" value="${counts[index]}" min="0" oninput="handleInput(${index}, this.value)">
-                    <button class="btn-circle plus" onclick="updateCount(${index}, 1)">+</button>
+                    <button class="btn-circle minus" data-action="minus" data-index="${index}">-</button>
+                    <input type="number" class="quantity-input" data-index="${index}" value="${counts[index]}" min="0">
+                    <button class="btn-circle plus" data-action="add" data-index="${index}">+</button>
                 </div>
             `;
             normalCards.push(card);
@@ -446,17 +1018,21 @@ window.addCustomItemSlot = function() {
     const index = inventory.length;
     inventory.push({ name: "Własny przedmiot", min: 0, max: 0, category: "inne", isCustom: true });
     counts[index] = 0;
-
     renderInventory();
-    showNotice("Dodano nowe pole na własny przedmiot (Skup)!", "success");
+    showNotice("Dodano nowe pole na własny przedmiot!", "success");
 }
 
 window.updateCustomName = function(index, value) {
     inventory[index].name = value || "Własny przedmiot";
-    const inputField = document.getElementById(`custom-name-${index}`);
-    if(inputField) {
-        const card = inputField.closest('.item-card');
-        if(card) card.setAttribute('data-name', inventory[index].name.toLowerCase());
+    const container = document.getElementById('items-list');
+    if(container) {
+        const inputs = container.querySelectorAll('.custom-item-name');
+        inputs.forEach(input => {
+            if(parseInt(input.getAttribute('data-index')) === index) {
+                const card = input.closest('.item-card');
+                if(card) card.setAttribute('data-name', inventory[index].name.toLowerCase());
+            }
+        });
     }
     updateCartView();
 }
@@ -468,16 +1044,101 @@ window.updateCustomPrice = function(index, value) {
     calculateTotal();
 }
 
+window.removeCustomItemSlot = function(index) {
+    inventory.splice(index, 1);
+    let newCounts = {};
+    for(let i = 0; i < inventory.length; i++) {
+        newCounts[i] = counts[i >= index ? i + 1 : i] || 0;
+    }
+    counts = newCounts;
+    renderInventory();
+    calculateTotal();
+};
+
+window.removeCustomItemSlotExport = function(index) {
+    exportInventory.splice(index, 1);
+    let newCounts = {};
+    for(let i = 0; i < exportInventory.length; i++) {
+        newCounts[i] = countsExport[i >= index ? i + 1 : i] || 0;
+    }
+    countsExport = newCounts;
+    renderInventoryExport();
+    calculateTotalExport();
+};
+
+window.productTrendsSkup = {};
+window.productTrendsExport = {};
+
+window.updateProductTrends = async function() {
+    try {
+        const data = await window.preloadReportsData();
+        const now = new Date().getTime();
+        // ZMIANA: Zamiast 7 dni, sprawdzamy dokładnie ostatnie 3 dni (3 * 24h)
+        const days3 = 3 * 24 * 60 * 60 * 1000; 
+        
+        const currSkup = {}, prevSkup = {};
+        const currExp = {}, prevExp = {};
+        
+        if (Array.isArray(data)) {
+            data.forEach(row => {
+                if (row.date && row.name) {
+                    const d = parseDate(row.date);
+                    if (d && !isNaN(d.getTime())) {
+                        const txTime = d.getTime();
+                        const itemName = String(row.name).toLowerCase().trim();
+                        const qty = parseInt(row.qty) || 1; 
+                        
+                        if (row.type === 'skup') {
+                            if (now - txTime <= days3) currSkup[itemName] = (currSkup[itemName] || 0) + qty;
+                            else if (now - txTime <= days3 * 2) prevSkup[itemName] = (prevSkup[itemName] || 0) + qty;
+                        } else if (row.type === 'sprzedaz') {
+                            if (now - txTime <= days3) currExp[itemName] = (currExp[itemName] || 0) + qty;
+                            else if (now - txTime <= days3 * 2) prevExp[itemName] = (prevExp[itemName] || 0) + qty;
+                        }
+                    }
+                }
+            });
+        }
+
+        const calcTrend = (curr, prev) => {
+            if (curr === 0 && prev === 0) return 'nodata';
+            if (curr > prev) return 'up';
+            if (curr < prev) return 'down';
+            return 'neutral';
+        };
+
+        // Obliczanie dla Skupu
+        defaultInventory.forEach(item => {
+            const nameLow = String(item.name).toLowerCase().trim();
+            window.productTrendsSkup[nameLow] = calcTrend(currSkup[nameLow] || 0, prevSkup[nameLow] || 0);
+        });
+
+        // Obliczanie dla Eksportu
+        defaultExportInventory.forEach(item => {
+            const nameLow = String(item.name).toLowerCase().trim();
+            window.productTrendsExport[nameLow] = calcTrend(currExp[nameLow] || 0, prevExp[nameLow] || 0);
+        });
+        
+    } catch (e) {
+        console.error("Błąd kalkulacji trendów rynkowych:", e);
+    }
+};
+
 window.updateCount = function(index, change) {
     counts[index] = Math.max(0, (counts[index] || 0) + change);
-    const countInput = document.getElementById(`count-${index}`);
-    if (countInput) countInput.value = counts[index];
+    const container = document.getElementById('items-list');
+    if (container) {
+        const input = container.querySelector(`.quantity-input[data-index="${index}"]`);
+        if (input) input.value = counts[index];
+    }
     calculateTotal();
+    window.triggerPulseEffect('total-price', 'cart-badge');
 }
 
 window.handleInput = function(index, value) {
     counts[index] = Math.max(0, parseInt(value) || 0);
     calculateTotal();
+    window.triggerPulseEffect('total-price', 'cart-badge');
 }
 
 function calculateTotal() {
@@ -486,18 +1147,323 @@ function calculateTotal() {
         min += item.min * (counts[index] || 0);
         max += item.max * (counts[index] || 0);
     });
+    const prevMin = currentMinTotal || 0;
     currentMinTotal = min; 
     currentMaxTotal = max; 
     const totalPriceEl = document.getElementById('total-price');
-    if(totalPriceEl) totalPriceEl.innerText = min + '$';
-    
-    const bonusEl = document.getElementById('bonus-range');
-    if (bonusEl) {
-        bonusEl.innerText = '+' + (max - min) + '$';
+    if(totalPriceEl) {
+        window.animateValue(totalPriceEl, prevMin, currentMinTotal, 400);
     }
-    
     updateCartView();
 }
+
+// ==========================================
+// SYSTEM ZAKŁADEK (PILL-STYLE) - ROZDZIELONY SKUP / SPRZEDAŻ
+// ==========================================
+window.skupTabs = [];
+window.activeSkupTabId = null;
+
+window.exportTabs = [];
+window.activeExportTabId = null;
+
+window.initTabs = function() {
+    skupTabs = [];
+    exportTabs = [];
+    
+    // Czysta karta dla Skupu
+    const newSkupId = "skup_" + Date.now();
+    skupTabs.push(createEmptyTabObj(newSkupId, "Klient 1", 'skup'));
+    activeSkupTabId = newSkupId;
+
+    // Czysta karta dla Sprzedaży
+    const newExpId = "export_" + Date.now();
+    exportTabs.push(createEmptyTabObj(newExpId, "Klient 1", 'export'));
+    activeExportTabId = newExpId;
+    
+    loadTabState(activeSkupTabId, 'skup');
+    loadTabState(activeExportTabId, 'export');
+};
+
+function createEmptyTabObj(id, name, type) {
+    if (type === 'skup') {
+        const freshInventory = JSON.parse(JSON.stringify(defaultInventory));
+        const freshCounts = {};
+        freshInventory.forEach((_, i) => freshCounts[i] = 0);
+        return { id, name, inventory: freshInventory, counts: freshCounts, ssn: "", finalPrice: "" };
+    } else {
+        const freshExportInventory = JSON.parse(JSON.stringify(defaultExportInventory));
+        const freshCountsExport = {};
+        freshExportInventory.forEach((_, i) => freshCountsExport[i] = 0);
+        return { id, name, exportInventory: freshExportInventory, countsExport: freshCountsExport, ssn: "" };
+    }
+}
+
+window.saveCurrentTabState = function(viewType = currentActiveView) {
+    if (viewType === 'skup') {
+        if (!activeSkupTabId) return;
+        let tab = skupTabs.find(t => t.id === activeSkupTabId);
+        if (tab) {
+            tab.inventory = JSON.parse(JSON.stringify(inventory));
+            tab.counts = JSON.parse(JSON.stringify(counts));
+            const ssnInput = document.getElementById('customer-ssn-input');
+            tab.ssn = ssnInput ? ssnInput.value : "";
+            const priceInput = document.getElementById('final-price-input');
+            tab.finalPrice = priceInput ? priceInput.value : "";
+        }
+    } else if (viewType === 'export') {
+        if (!activeExportTabId) return;
+        let tab = exportTabs.find(t => t.id === activeExportTabId);
+        if (tab) {
+            tab.exportInventory = JSON.parse(JSON.stringify(exportInventory));
+            tab.countsExport = JSON.parse(JSON.stringify(countsExport));
+            const ssnInput = document.getElementById('customer-ssn-input-export');
+            tab.ssn = ssnInput ? ssnInput.value : "";
+        }
+    }
+};
+
+window.loadTabState = function(tabId, viewType = currentActiveView) {
+    if (viewType === 'skup') {
+        let tab = skupTabs.find(t => t.id === tabId);
+        if (!tab) return;
+        activeSkupTabId = tabId;
+        inventory = JSON.parse(JSON.stringify(tab.inventory));
+        counts = JSON.parse(JSON.stringify(tab.counts));
+        
+        const ssnInput = document.getElementById('customer-ssn-input');
+        if (ssnInput) ssnInput.value = tab.ssn;
+        currentCustomerSSN = tab.ssn;
+        
+        const priceInput = document.getElementById('final-price-input');
+        if (priceInput) priceInput.value = tab.finalPrice;
+
+        renderInventory();
+        calculateTotal();
+    } else if (viewType === 'export') {
+        let tab = exportTabs.find(t => t.id === tabId);
+        if (!tab) return;
+        activeExportTabId = tabId;
+        exportInventory = JSON.parse(JSON.stringify(tab.exportInventory));
+        countsExport = JSON.parse(JSON.stringify(tab.countsExport));
+        
+        const ssnInput = document.getElementById('customer-ssn-input-export');
+        if (ssnInput) ssnInput.value = tab.ssn;
+        currentCustomerSSNExport = tab.ssn;
+
+        renderInventoryExport();
+        calculateTotalExport();
+    }
+    renderTabsUI();
+};
+
+// --- NOWA FUNKCJA POMOCNICZA DO WYZNACZANIA WOLNEGO NUMERU ---
+window.getFreeClientName = function(tabsArray, ignoreId = null) {
+    let usedNums = tabsArray.map(t => {
+        if (ignoreId && t.id === ignoreId) return 0;
+        let match = t.name.match(/^Klient (\d+)$/);
+        return match ? parseInt(match[1]) : 0;
+    });
+    let nextNum = 1;
+    while(usedNums.includes(nextNum)) nextNum++;
+    return `Klient ${nextNum}`;
+};
+
+window.createNewTab = function(nameStr, viewType = currentActiveView) {
+    saveCurrentTabState(viewType);
+    
+    const newId = viewType + "_" + Date.now().toString() + Math.random().toString().substr(2,4);
+    
+    if (viewType === 'skup') {
+        if (skupTabs.length >= 3) return showNotice("Maksymalnie możesz mieć otwarte 3 rachunki!", "warning");
+        const newName = nameStr || window.getFreeClientName(skupTabs);
+        skupTabs.push(createEmptyTabObj(newId, newName, 'skup'));
+    } else {
+        if (exportTabs.length >= 3) return showNotice("Maksymalnie możesz mieć otwarte 3 rachunki!", "warning");
+        const newName = nameStr || window.getFreeClientName(exportTabs);
+        exportTabs.push(createEmptyTabObj(newId, newName, 'export'));
+    }
+    
+    loadTabState(newId, viewType);
+};
+
+window.switchTab = function(tabId, viewType) {
+    if (viewType === 'skup' && activeSkupTabId === tabId) return;
+    if (viewType === 'export' && activeExportTabId === tabId) return;
+    
+    saveCurrentTabState(viewType);
+    loadTabState(tabId, viewType);
+};
+
+window.closeTab = function(tabId, viewType, event) {
+    event.stopPropagation();
+    
+    let targetArr = viewType === 'skup' ? skupTabs : exportTabs;
+    let activeId = viewType === 'skup' ? activeSkupTabId : activeExportTabId;
+    
+    let tab = targetArr.find(t => t.id === tabId);
+    if (tab) {
+        let itemsCount = 0;
+        if (viewType === 'skup') itemsCount = Object.values(tab.counts || {}).reduce((a, b) => a + b, 0);
+        if (viewType === 'export') itemsCount = Object.values(tab.countsExport || {}).reduce((a, b) => a + b, 0);
+        
+        if (itemsCount > 0) {
+            showNotice("Nie można zamknąć! Posiadasz tu otwarty rachunek.", "danger");
+            const tabElement = event.target.closest('.cart-tab');
+            if (tabElement) {
+                tabElement.style.animation = 'none';
+                void tabElement.offsetWidth; 
+                tabElement.style.animation = 'icon-shake-anim 0.4s ease'; 
+            }
+            return; 
+        }
+    }
+
+    if (targetArr.length === 1) {
+        if (viewType === 'skup') resetCartAndInventory();
+        else resetCartAndInventoryExport();
+        return;
+    }
+    
+    const idx = targetArr.findIndex(t => t.id === tabId);
+    targetArr.splice(idx, 1);
+    
+    if (activeId === tabId) {
+        const nextTab = targetArr[idx - 1] || targetArr[0];
+        loadTabState(nextTab.id, viewType);
+    } else {
+        renderTabsUI();
+    }
+};
+
+window.renameTab = function(tabId, viewType, event) {
+    if (event) event.stopPropagation();
+    let targetArr = viewType === 'skup' ? skupTabs : exportTabs;
+    let tab = targetArr.find(t => t.id === tabId);
+    if (!tab) return;
+    
+    const newName = prompt("Wpisz własną nazwę / opis dla tego rachunku:", tab.name);
+    if (newName !== null && newName.trim() !== "") {
+        tab.name = newName.trim();
+        renderTabsUI();
+    }
+};
+
+window.renderTabsUI = function() {
+    saveCurrentTabState('skup'); 
+    saveCurrentTabState('export'); 
+    
+    let htmlSkup = '';
+    skupTabs.forEach((tab) => {
+        const isActive = tab.id === activeSkupTabId ? 'active' : '';
+        let itemsCount = Object.values(tab.counts || {}).reduce((a, b) => a + b, 0);
+        let indicator = itemsCount > 0 ? `<span class="tab-indicator"></span>` : '';
+        
+        let displayName = tab.name;
+        if (tab.ssn && tab.name.startsWith("Klient ")) displayName = `SSN: ${tab.ssn}`;
+
+        // NOWE: dodane atrybuty draggable i zdarzenia drag
+        htmlSkup += `
+            <div class="cart-tab ${isActive}" 
+                 draggable="true"
+                 ondragstart="window.handleTabDragStart(event, '${tab.id}', 'skup')"
+                 ondragover="window.handleTabDragOver(event)"
+                 ondrop="window.handleTabDrop(event, '${tab.id}', 'skup')"
+                 ondragend="this.style.opacity='1'"
+                 onclick="switchTab('${tab.id}', 'skup')" 
+                 ondblclick="window.renameTab('${tab.id}', 'skup', event)" 
+                 title="Przeciągnij, by zmienić kolejność. Kliknij 2x, by zmienić nazwę.">
+                <span>${displayName} ${indicator}</span>
+                <button class="close-tab-btn" onclick="closeTab('${tab.id}', 'skup', event)" title="Zamknij rachunek"><i class="fas fa-times"></i></button>
+            </div>
+        `;
+    });
+    if (skupTabs.length < 3) {
+        htmlSkup += `<button class="new-tab-btn" onclick="createNewTab(null, 'skup')" title="Otwórz nowy rachunek"><i class="fas fa-plus"></i></button>`;
+    }
+    
+    let htmlExport = '';
+    exportTabs.forEach((tab) => {
+        const isActive = tab.id === activeExportTabId ? 'active' : '';
+        let itemsCount = Object.values(tab.countsExport || {}).reduce((a, b) => a + b, 0);
+        let indicator = itemsCount > 0 ? `<span class="tab-indicator"></span>` : '';
+        
+        let displayName = tab.name;
+        if (tab.ssn && tab.name.startsWith("Klient ")) displayName = `SSN: ${tab.ssn}`;
+
+        // NOWE: dodane atrybuty draggable i zdarzenia drag
+        htmlExport += `
+            <div class="cart-tab ${isActive}" 
+                 draggable="true"
+                 ondragstart="window.handleTabDragStart(event, '${tab.id}', 'export')"
+                 ondragover="window.handleTabDragOver(event)"
+                 ondrop="window.handleTabDrop(event, '${tab.id}', 'export')"
+                 ondragend="this.style.opacity='1'"
+                 onclick="switchTab('${tab.id}', 'export')" 
+                 ondblclick="window.renameTab('${tab.id}', 'export', event)" 
+                 title="Przeciągnij, by zmienić kolejność. Kliknij 2x, by zmienić nazwę.">
+                <span>${displayName} ${indicator}</span>
+                <button class="close-tab-btn" onclick="closeTab('${tab.id}', 'export', event)" title="Zamknij rachunek"><i class="fas fa-times"></i></button>
+            </div>
+        `;
+    });
+    if (exportTabs.length < 3) {
+        htmlExport += `<button class="new-tab-btn" onclick="createNewTab(null, 'export')" title="Otwórz nowy rachunek"><i class="fas fa-plus"></i></button>`;
+    }
+    
+    const skupContainer = document.getElementById('skup-tabs-container');
+    if (skupContainer) skupContainer.innerHTML = htmlSkup;
+    
+    const sprzedazContainer = document.getElementById('sprzedaz-tabs-container');
+    if (sprzedazContainer) sprzedazContainer.innerHTML = htmlExport;
+    
+    const exportContainer = document.getElementById('export-tabs-container');
+    if (exportContainer) exportContainer.innerHTML = htmlExport;
+};
+
+// ==========================================
+// DRAG & DROP DLA ZAKŁADEK
+// ==========================================
+window.draggedTabInfo = null;
+
+window.handleTabDragStart = function(event, tabId, viewType) {
+    window.draggedTabInfo = { id: tabId, type: viewType };
+    event.dataTransfer.effectAllowed = "move";
+    
+    // Lekko wyszarzamy kartę, którą aktualnie trzymamy
+    setTimeout(() => {
+        if (event.target) event.target.style.opacity = '0.4';
+    }, 0);
+};
+
+window.handleTabDragOver = function(event) {
+    event.preventDefault(); // Niezbędne, żeby przeglądarka pozwoliła tu coś upuścić
+    event.dataTransfer.dropEffect = "move";
+};
+
+window.handleTabDrop = function(event, targetTabId, viewType) {
+    event.preventDefault();
+    
+    // Zabezpieczenie: upewniamy się, że przeciągamy kartę w odpowiednim widoku
+    if (!window.draggedTabInfo || window.draggedTabInfo.type !== viewType) return;
+    
+    const draggedId = window.draggedTabInfo.id;
+    if (draggedId === targetTabId) return; // Jeśli upuszczono w tym samym miejscu, nic nie rób
+
+    const targetArr = viewType === 'skup' ? skupTabs : exportTabs;
+    
+    const draggedIndex = targetArr.findIndex(t => t.id === draggedId);
+    const targetIndex = targetArr.findIndex(t => t.id === targetTabId);
+    
+    if (draggedIndex !== -1 && targetIndex !== -1) {
+        // Wyciągamy kartę z jej starego miejsca...
+        const [movedTab] = targetArr.splice(draggedIndex, 1);
+        // ...i wpychamy na nowe!
+        targetArr.splice(targetIndex, 0, movedTab);
+        
+        renderTabsUI();
+    }
+    window.draggedTabInfo = null;
+};
 
 window.toggleCart = function() {
     const sidebar = document.getElementById('cart-sidebar');
@@ -524,9 +1490,9 @@ function updateCartView() {
                     <div class="cart-item-info-col">
                         <span class="cart-item-name">${item.name}</span>
                         <div class="cart-controls">
-                            <button class="cart-btn-circle minus" onclick="updateCount(${index}, -1)">-</button>
+                            <button class="cart-btn-circle minus" data-action="minus" data-index="${index}">-</button>
                             <span class="cart-item-qty">${counts[index]}</span>
-                            <button class="cart-btn-circle plus" onclick="updateCount(${index}, 1)">+</button>
+                            <button class="cart-btn-circle plus" data-action="add" data-index="${index}">+</button>
                         </div>
                     </div>
                     <div class="cart-item-price-col">${priceText}</div>
@@ -534,29 +1500,31 @@ function updateCartView() {
             `;
         }
     });
-
-    if (totalItems === 0) {
-        html = '<div class="empty-cart-msg">Koszyk jest pusty</div>';
-    }
-
+    
+    if (totalItems === 0) html = '<div class="empty-cart-msg">Koszyk jest pusty</div>';
     if (container) container.innerHTML = html;
     if (badge) badge.innerText = totalItems;
     if (sidebarTotal) sidebarTotal.innerText = currentMinTotal + '$' + (currentMaxTotal > currentMinTotal ? ` - ${currentMaxTotal}$` : '');
+    
+    // --- NOWE: Błyskawiczne odświeżanie paska zakładek i kropki ---
+    if (typeof window.renderTabsUI === 'function') {
+        window.renderTabsUI();
+    }
 }
 
-window.filterCategory = function(cat, btn) {
-    currentCategory = cat;
+window.filterCategory = function(cat, btnElement) {
+    currentCategory = cat || 'wszystkie';
     const viewSkup = document.getElementById('view-skup');
     if(viewSkup) {
         viewSkup.querySelectorAll('.categories-container .cat-btn').forEach(b => b.classList.remove('active'));
     }
-    if(btn) btn.classList.add('active');
+    if(btnElement) btnElement.classList.add('active');
     applyFilters();
 }
 
 function applyFilters() {
     const searchInputEl = document.getElementById('search-input');
-    const term = searchInputEl ? searchInputEl.value.toLowerCase() : "";
+    const term = searchInputEl ? window.removePolishDiacritics(searchInputEl.value) : "";
     const adSection = document.getElementById('ad-section');
     const itemsList = document.getElementById('items-list');
     const asortymentHeader = document.getElementById('asortyment-header-wrapper');
@@ -571,16 +1539,31 @@ function applyFilters() {
         if(asortymentHeader) asortymentHeader.classList.remove('hidden');
         if(itemsList) {
             itemsList.querySelectorAll('.item-card').forEach(card => {
-                const name = card.getAttribute('data-name') || '';
+                const name = window.removePolishDiacritics(card.getAttribute('data-name') || '');
                 const cat = card.getAttribute('data-category') || '';
                 const match = name.includes(term) && (currentCategory === 'wszystkie' || cat === currentCategory);
-                card.classList.toggle('hidden', !match);
+                if (match) card.classList.remove('hidden');
+                else card.classList.add('hidden');
             });
         }
     }
 }
 
 window.generateQuote = async function() {
+    // WALIDACJA NIESTANDARDOWYCH PRODUKTÓW ORAZ DYNAMICZNYCH CEN
+    for (let i = 0; i < inventory.length; i++) {
+        if (counts[i] > 0 && inventory[i].isCustom) {
+            if (inventory[i].min <= 0 || inventory[i].name === "Własny przedmiot" || inventory[i].name.trim() === "") {
+                return showNotice("Uzupełnij poprawną nazwę i cenę dla niestandardowych produktów!", "danger");
+            }
+        }
+        if (counts[i] > 0 && inventory[i].dynamicPrice) {
+            if (inventory[i].min <= 0) {
+                return showNotice(`Uzupełnij cenę dla produktu: ${inventory[i].name}!`, "danger");
+            }
+        }
+    }
+
     const hasItems = Object.values(counts).some(c => c > 0);
     const finalPriceInput = document.getElementById('final-price-input');
     const finalPrice = finalPriceInput ? parseFloat(finalPriceInput.value) : NaN;
@@ -588,18 +1571,9 @@ window.generateQuote = async function() {
     currentCustomerSSN = ssnInput ? ssnInput.value.trim() : "";
 
     if (!hasItems) return showNotice("Koszyk skupu jest pusty!", "warning");
-    
-    if (isNaN(finalPrice)) {
-        return showNotice("Wpisz kwotę transakcji!", "danger");
-    }
-    
-    if (finalPrice < currentMinTotal) {
-        return showNotice(`Kwota zbyt niska! Wymagane: ${currentMinTotal}$.`, "danger");
-    }
-
-    if (finalPrice > currentMaxTotal) {
-        return showNotice(`Kwota zbyt wysoka! Wymagane: ${currentMaxTotal}$.`, "danger");
-    }
+    if (isNaN(finalPrice)) return showNotice("Wpisz kwotę transakcji!", "danger");
+    if (finalPrice < currentMinTotal) return showNotice(`Kwota zbyt niska! Wymagane: ${currentMinTotal}$.`, "danger");
+    if (finalPrice > currentMaxTotal) return showNotice(`Kwota zbyt wysoka! Wymagane: ${currentMaxTotal}$.`, "danger");
 
     const btn = document.getElementById('quote-btn');
     if(!btn) return;
@@ -608,7 +1582,14 @@ window.generateQuote = async function() {
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Przetwarzanie...';
 
     setTimeout(() => {
-        finalizeQuote(currentEmployeeName, finalPrice);
+        try {
+            finalizeQuote(currentEmployeeName || "Pracownik", finalPrice);
+        } catch (error) {
+            console.error("Błąd generowania paragonu:", error);
+            if (window.showNotice) {
+                window.showNotice("Błąd paragonu: " + error.message, "danger", 5000);
+            }
+        }
         btn.disabled = false;
         btn.innerHTML = originalBtnHtml;
     }, 400);
@@ -616,18 +1597,15 @@ window.generateQuote = async function() {
 
 function finalizeQuote(employeeName, finalPrice) {
     isStatAddedForCurrentReceipt = false;
-    
     const receiptID = generateID();
     const currentReceiptDateEl = document.getElementById('current-receipt-date');
-    if(currentReceiptDateEl) currentReceiptDateEl.innerText = getFormattedDate();
+    if(currentReceiptDateEl) currentReceiptDateEl.innerText = getFormattedDateTime();
     
     const receiptIdDisplay = document.getElementById('receipt-id-display');
     if(receiptIdDisplay) receiptIdDisplay.innerText = `NR: ${receiptID}`;
     
     let employeeText = `PRACOWNIK: ${employeeName.toUpperCase()}`;
-    if (currentCustomerSSN !== "") {
-        employeeText += `<br>KLIENT (SSN): ${currentCustomerSSN}`;
-    }
+    if (currentCustomerSSN !== "") employeeText += `<br>KLIENT [SSN]: ${currentCustomerSSN}`;
     const receiptEmployeeDisplay = document.getElementById('receipt-employee-display');
     if(receiptEmployeeDisplay) receiptEmployeeDisplay.innerHTML = employeeText;
     
@@ -650,76 +1628,187 @@ function finalizeQuote(employeeName, finalPrice) {
         });
 
         let sigDiv = document.querySelector('.receipt-signature');
-        if (!sigDiv) {
+        const footerEl = document.querySelector('.receipt-footer');
+        
+        if (!sigDiv && footerEl && itemsDiv.parentNode) {
             sigDiv = document.createElement('div');
             sigDiv.className = 'receipt-signature';
-            itemsDiv.parentNode.insertBefore(sigDiv, document.querySelector('.receipt-footer'));
+            itemsDiv.parentNode.insertBefore(sigDiv, footerEl);
         }
-        sigDiv.innerHTML = `<span class="signature-label">Podpis pracownika</span><span class="signature-text">${employeeName}</span>`;
+        
+        if (sigDiv) {
+            sigDiv.innerHTML = `<span class="signature-label">Podpis pracownika</span><span class="signature-text">${employeeName}</span>`;
+        }
     }
 
     const quoteModal = document.getElementById('quote-modal');
     if(quoteModal) quoteModal.classList.add('active');
+    
+    const receiptBox = document.getElementById('receipt');
+    const stampBox = document.querySelector('#receipt .receipt-stamp');
+    if (receiptBox && stampBox) {
+        receiptBox.classList.remove('receipt-shake');
+        stampBox.style.animation = 'none';
+        void receiptBox.offsetWidth; // Wymuszenie reflow
+        receiptBox.classList.add('receipt-shake');
+        stampBox.style.animation = '';
+    }
 }
 
 window.sendToDiscord = async function() {
-    console.log("--- START DEBUGOWANIA WYSYŁKI ---");
     const btn = document.getElementById('send-discord-btn');
     const area = document.getElementById('receipt-capture-area');
+    if(!area || !btn) return;
     
-    if(!area) { console.error("BŁĄD: Nie znaleziono elementu receipt-capture-area"); return; }
+    // ANTI-SPAM GUARD
+    if (window.isSkupProcessing) return;
+    window.isSkupProcessing = true;
     
-    // Wymuszenie widoczności dla html2canvas
-    area.style.display = "block";
-    area.style.visibility = "visible";
-    
-    console.log("Wymiary obszaru:", area.offsetWidth, "x", area.offsetHeight);
-    
+    const receiptIDDisplay = document.getElementById('receipt-id-display');
+    const receiptID = receiptIDDisplay ? receiptIDDisplay.innerText.replace('NR: ', '') : '';
+    const employee = currentEmployeeName; 
+    const finalPriceTextEl = document.getElementById('receipt-total');
+    const finalPriceText = finalPriceTextEl ? finalPriceTextEl.innerText : '0$';
+    const finalPriceNumeric = parseFloat(finalPriceText.replace('$', ''));
+
     btn.disabled = true;
-    btn.innerHTML = 'Debuguję...';
+    btn.innerText = "Wysyłanie...";
+
+    const itemsToLog = [];
+    let remainingAmount = finalPriceNumeric;
+    const ratio = finalPriceNumeric / currentMinTotal;
+    
+    const activeItems = inventory.map((item, index) => ({ item, index })).filter(x => counts[x.index] > 0);
+
+    activeItems.forEach((x, arrayIndex) => {
+        const item = x.item;
+        const count = counts[x.index];
+        let calculatedTotal;
+        if (arrayIndex === activeItems.length - 1) calculatedTotal = remainingAmount;
+        else {
+            calculatedTotal = Math.round(item.min * count * ratio);
+            remainingAmount -= calculatedTotal;
+        }
+        itemsToLog.push({ name: item.name, qty: count, total: calculatedTotal });
+    });
+
+    const logPayload = {
+        action: "save_receipt",
+        type: "skup",
+        date: getFormattedDateTime(),
+        employee: currentEmployeeName,
+        report_id: receiptID, 
+        items: itemsToLog,
+        ssn: currentCustomerSSN 
+    };
 
     try {
-        console.log("Próba html2canvas...");
         const canvas = await html2canvas(area, { 
             scale: 2, 
             backgroundColor: "#ffffff", 
             useCORS: true,
-            logging: true // To włączy logi samej biblioteki w konsoli
-        });
-        
-        console.log("Canvas wygenerowany, tworzę blob...");
-        
-        canvas.toBlob(async (blob) => {
-            if (!blob) {
-                console.error("BŁĄD: Blob jest pusty!");
-                return;
+            onclone: (clonedDoc) => {
+                const clonedArea = clonedDoc.getElementById('receipt-capture-area');
+                if (clonedArea) {
+                    const receiptEl = clonedArea.querySelector('.receipt');
+                    const stampEl = clonedArea.querySelector('.receipt-stamp');
+                    if (receiptEl) {
+                        receiptEl.style.setProperty('animation', 'none', 'important');
+                        receiptEl.style.setProperty('transform', 'translate(0, 0)', 'important');
+                    }
+                    if (stampEl) {
+                        stampEl.style.setProperty('animation', 'none', 'important');
+                        stampEl.style.setProperty('transform', 'scale(1) rotate(-15deg)', 'important');
+                        stampEl.style.setProperty('opacity', '0.8', 'important');
+                    }
+                }
             }
-            console.log("Blob ma rozmiar:", blob.size, "bajtów. Wysyłam...");
-            
+        });
+
+        canvas.toBlob(async (blob) => {
             const formData = new FormData();
             formData.append("file", blob, "paragon.png");
-            formData.append("payload_json", JSON.stringify({ content: "Test paragonu" }));
+            
+            let employeeFieldValue = `**${currentEmployeeName}**`;
+
+            // PANCERNY UKŁAD 2-KOLUMNOWY
+            const embedFields = [
+                { 
+                    name: "Dane transakcji", 
+                    value: `**📋 Numer paragonu:**\n\`${receiptID}\`\n\n**🤝 Klient [SSN]:**\n\`${currentCustomerSSN !== "" ? currentCustomerSSN : "-"}\``, 
+                    inline: true 
+                },
+                { 
+                    name: "Rozliczenie", 
+                    value: `**👤 Pracownik:**\n${employeeFieldValue}\n\n**💰 Suma:**\n**${finalPriceText}**`, 
+                    inline: true 
+                }
+            ];
+
+            const embedPayload = {
+                username: currentEmployeeName || "Pracownik",
+                embeds: [{
+                    title: "📑 Wystawiono nowy paragon!",
+                    color: 36991, 
+                    fields: embedFields,
+                    image: { url: "attachment://paragon.png" },
+                    timestamp: new Date().toISOString(),
+                    footer: { text: "System EL CARTEL PAWN SHOP" }
+                }]
+            };
+
+            if (currentEmployeePhoto && currentEmployeePhoto.trim() !== "") {
+                embedPayload.avatar_url = currentEmployeePhoto;
+            }
+
+            formData.append("payload_json", JSON.stringify(embedPayload));
             
             const res = await fetch(DISCORD_WEBHOOK_URL_SKUP, { method: "POST", body: formData });
-            
             if (res.ok) {
-                console.log("SUKCES: Wysłano na Discord!");
-                showNotice("Wysłano na Discord!", "success");
+                // ZAPIS DO BAZY PRZEZ WORKERA (TŁUMACZA)
+                fetch(REPORTS_API_URL, { 
+                    method: "POST", 
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(logPayload) 
+                }).catch(e => console.error("Błąd zapisu:", e));
+
+                if (!isStatAddedForCurrentReceipt) {
+                    addDailyStat(currentEmployeeName, finalPriceNumeric);
+                    isStatAddedForCurrentReceipt = true;
+                }
+                // Wstaw to przed showNotice("Wysłano na Discord...");
+                window.updateWarehouse(itemsToLog, 'add');
+                showNotice("Wysłano na Discord i zaktualizowano obrót!", "success");
+
+                window.addSystemLog('SKUP', `Wystawiono paragon [${receiptID}] na kwotę: ${finalPriceNumeric}$`);
+
                 resetCartAndInventory();
                 closeModal();
-            } else {
-                console.error("BŁĄD: Discord odpowiedział kodem", res.status);
-                showNotice("Błąd Discord: " + res.status, "danger");
-            }
+                
+                // Inwalidacja cache po dodaniu nowego wpisu
+                window.reportsFetchPromise = null;
+                window.bonusesFetchPromise = null;
+                window.errorReportsFetchPromise = null;
+                updateOnlineEmployees(); 
+            } else throw new Error();
         }, "image/png");
-        
     } catch (e) {
-        console.error("BŁĄD KRYTYCZNY w html2canvas:", e);
-        showNotice("Błąd canvas: " + e.message, "danger");
+        showNotice("Błąd Webhooka!", "danger");
     } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fab fa-discord"></i> Wyślij na Discord';
-        area.style.display = "none"; // Chowamy z powrotem
+        // VISUAL COOLDOWN ANTYSZPAMOWY (2 SEKUNDY)
+        let cooldownTime = 2;
+        btn.innerHTML = `<i class="fas fa-lock"></i> Cooldown (${cooldownTime}s)`;
+        const interval = setInterval(() => {
+            cooldownTime--;
+            if (cooldownTime <= 0) {
+                clearInterval(interval);
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fab fa-discord"></i> Wyślij na Discord';
+                window.isSkupProcessing = false;
+            } else {
+                btn.innerHTML = `<i class="fas fa-lock"></i> Cooldown (${cooldownTime}s)`;
+            }
+        }, 1000);
     }
 }
 
@@ -734,15 +1823,30 @@ window.copyReceiptToClipboard = async function() {
     try {
         const canvas = await html2canvas(area, { 
             scale: 2, 
-            backgroundColor: "#ffffff",
-            useCORS: true 
+            backgroundColor: "#ffffff", 
+            useCORS: true,
+            onclone: (clonedDoc) => {
+                const clonedArea = clonedDoc.getElementById('receipt-capture-area');
+                if (clonedArea) {
+                    const receiptEl = clonedArea.querySelector('.receipt');
+                    const stampEl = clonedArea.querySelector('.receipt-stamp');
+                    if (receiptEl) {
+                        receiptEl.style.setProperty('animation', 'none', 'important');
+                        receiptEl.style.setProperty('transform', 'translate(0, 0)', 'important');
+                    }
+                    if (stampEl) {
+                        stampEl.style.setProperty('animation', 'none', 'important');
+                        stampEl.style.setProperty('transform', 'scale(1) rotate(-15deg)', 'important');
+                        stampEl.style.setProperty('opacity', '0.8', 'important');
+                    }
+                }
+            }
         });
-        
+
         canvas.toBlob(async (blob) => {
             try {
                 const data = [new ClipboardItem({ [blob.type]: blob })];
                 await navigator.clipboard.write(data);
-                
                 showNotice("Skopiowano paragon do schowka!", "success");
             } catch (err) {
                 showNotice("Błąd kopiowania! Spróbuj innej przeglądarki.", "danger");
@@ -759,7 +1863,6 @@ window.copyReceiptToClipboard = async function() {
 window.updateAdPreview = function() {
     const input = document.getElementById('ad-input');
     if(!input) return;
-    
     const preview = document.getElementById('ad-preview');
     const colors = {'~r~':'#ff4444','~g~':'#33ff33','~b~':'#3399ff','~y~':'#ffff33','~p~':'#cc66ff','~o~':'#ff9933','~w~':'#fff','~s~':'#fff'};
     let html = "", style = "color:#fff", bold = false;
@@ -796,44 +1899,45 @@ window.closeModal = function() {
 window.toggleSummary = function() {
     const bar = document.getElementById('summary-bar');
     const icon = document.getElementById('toggle-icon');
-    
     if (bar && icon) {
         bar.classList.toggle('open');
-        
-        if (bar.classList.contains('open')) {
-            icon.classList.replace('fa-chevron-up', 'fa-chevron-down');
-        } else {
-            icon.classList.replace('fa-chevron-down', 'fa-chevron-up');
-        }
+        if (bar.classList.contains('open')) icon.classList.replace('fa-chevron-up', 'fa-chevron-down');
+        else icon.classList.replace('fa-chevron-down', 'fa-chevron-up');
     }
 }
 
-// ==========================================
-// LOGIKA - EKSPORT (SPRZEDAŻ)
-// ==========================================
 function initExport() {
     const list = document.getElementById('items-list-export');
     if (!list) return;
-    
     list.innerHTML = '';
     const headerDateExport = document.getElementById('header-date-export');
     if(headerDateExport) headerDateExport.innerText = getFormattedDate();
-    
     resetCartAndInventoryExport();
+    
+    // Czeka na dane o trendach i odświeża widok eksportu
+    updateProductTrends().then(() => renderInventoryExport());
+
+    // DODAJEMY TĘ LINIKĘ:
+    window.updateTimeBasedGreeting();
 }
 
 function resetCartAndInventoryExport() {
     exportInventory = JSON.parse(JSON.stringify(defaultExportInventory));
     countsExport = {};
-    
     exportInventory.forEach((_, index) => { countsExport[index] = 0; });
-
     const ssnInput = document.getElementById('customer-ssn-input-export');
     if (ssnInput) ssnInput.value = "";
     currentCustomerSSNExport = "";
+    
+    // --- INTELIGENTNY RESET NAZWY ---
+    if (window.exportTabs && window.activeExportTabId) {
+        const tab = window.exportTabs.find(t => t.id === window.activeExportTabId);
+        if (tab) tab.name = window.getFreeClientName(window.exportTabs, tab.id);
+    }
 
     renderInventoryExport();
     calculateTotalExport();
+    if (typeof window.renderTabsUI === 'function') window.renderTabsUI();
 }
 
 function renderInventoryExport() {
@@ -841,56 +1945,96 @@ function renderInventoryExport() {
     if(!list) return;
     list.innerHTML = ''; 
     
+    const customCards = [];
+    const normalCards = [];
+
     exportInventory.forEach((item, index) => {
         if(countsExport[index] === undefined) countsExport[index] = 0;
         const card = document.createElement('div');
-        card.className = 'item-card';
+        let cardClass = showImagesExport ? 'item-card show-images' : 'item-card';
         card.setAttribute('data-category', item.category);
         card.setAttribute('data-name', item.name.toLowerCase());
         
-        if(item.isCustom) {
-            card.classList.add('custom-item');
+		if(item.isCustom) {
+            card.className = cardClass + ' custom-item';
             card.id = `custom-card-export-${index}`;
             card.innerHTML = `
-                <div class="custom-inputs-wrapper">
-                    <input type="text" class="custom-name-input" placeholder="Wpisz nazwę..." value="${item.name === 'Własny przedmiot' ? '' : item.name}" oninput="updateCustomNameExport(${index}, this.value)">
-                    <input type="number" class="custom-price-input" placeholder="Cena $" min="0" value="${item.price > 0 ? item.price : ''}" oninput="updateCustomPriceExport(${index}, this.value)">
+                <div class="item-left-side">
+                    <button onclick="removeCustomItemSlotExport(${index})" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.15); color: var(--danger); cursor: pointer; flex-shrink: 0; display: flex; justify-content: center; align-items: center; transition: 0.2s;" title="Usuń pole" onmouseover="this.style.background='var(--danger)'; this.style.color='#fff';" onmouseout="this.style.background='rgba(239, 68, 68, 0.15)'; this.style.color='var(--danger)';"><i class="fas fa-trash"></i></button>
+                    <div class="custom-inputs-wrapper" style="margin-right: 0;">
+                        <input type="text" class="custom-name-input" data-index="${index}" placeholder="Wpisz nazwę..." value="${item.name === 'Własny przedmiot' ? '' : item.name}">
+                        <input type="number" class="custom-price-input" data-index="${index}" placeholder="Cena $" min="0" value="${item.price > 0 ? item.price : ''}">
+                    </div>
                 </div>
                 <div class="controls">
-                    <button class="btn-circle minus" onclick="updateCountExport(${index}, -1)">-</button>
-                    <input type="number" id="count-export-${index}" class="quantity-input" value="${countsExport[index]}" min="0" oninput="handleInputExport(${index}, this.value)">
-                    <button class="btn-circle plus" onclick="updateCountExport(${index}, 1)">+</button>
+                    <button class="btn-circle minus" data-action="minus" data-index="${index}">-</button>
+                    <input type="number" class="quantity-input" data-index="${index}" value="${countsExport[index]}" min="0">
+                    <button class="btn-circle plus" data-action="add" data-index="${index}">+</button>
                 </div>
             `;
-            list.insertBefore(card, list.firstChild);
-        } else {
+            customCards.push(card);
+} else {
+            card.className = cardClass;
+            
+            let trendHtml = '';
+            const nameLow = String(item.name).toLowerCase().trim();
+            const trend = window.productTrendsExport ? window.productTrendsExport[nameLow] : null;
+
+            if (trend === 'up') {
+                trendHtml = `<span title="Więcej sprzedanych sztuk względem ostatnich 3 dni." style="background: rgba(34, 197, 94, 0.15); border: 1px solid rgba(34, 197, 94, 0.3); color: var(--success); padding: 2px 8px; border-radius: 6px; font-size: 0.8rem; cursor: help; display: inline-flex; align-items: center;"><i class="fas fa-arrow-trend-up"></i></span>`;
+            } else if (trend === 'down') {
+                trendHtml = `<span title="Mniej sprzedanych sztuk względem ostatnich 3 dni." style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: var(--danger); padding: 2px 8px; border-radius: 6px; font-size: 0.8rem; cursor: help; display: inline-flex; align-items: center;"><i class="fas fa-arrow-trend-down"></i></span>`;
+            } else if (trend === 'neutral') {
+                trendHtml = `<span title="Sprzedaż stabilna. Idziecie łeb w łeb z poprzednim okresem." style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); color: var(--text-secondary); padding: 2px 8px; border-radius: 6px; font-size: 0.8rem; cursor: help; display: inline-flex; align-items: center;"><i class="fas fa-minus"></i></span>`;
+            } else {
+                trendHtml = `<span title="Brak wystarczających danych z ostatnich 6 dni." style="background: transparent; border: 1px dashed rgba(255, 255, 255, 0.2); color: var(--text-secondary); padding: 2px 8px; border-radius: 6px; font-size: 0.8rem; cursor: help; opacity: 0.5; display: inline-flex; align-items: center;"><i class="fas fa-minus"></i></span>`;
+            }
+
+            let imageHtml = item.image ? `<img src="${item.image}" class="item-image" alt="">` : `<i class="fas fa-box-open item-icon"></i>`;
+            
+            let priceElementHtml = '';
+            if (item.dynamicPrice) {
+                // Całkowicie wywalone "Sprzedaż: " z przodu + węższy input (70px)
+                priceElementHtml = `<input type="number" class="custom-price-input" data-index="${index}" placeholder="Cena $" min="0" value="${item.price > 0 ? item.price : ''}" style="width: 70px; padding: 4px 8px; border-radius: 8px; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); color: var(--accent-color); font-weight: 700; outline: none;">`;
+            } else {
+                // Wywalone słowo "Sprzedaż:" - zostaje sama liczba
+                priceElementHtml = `<span class="item-price">${item.price}$</span>`;
+            }
+
             card.innerHTML = `
-                <div class="item-info">
-                    <span class="item-name">${item.name}</span>
-                    <span class="item-price">Sprzedaż: ${item.price}$</span>
+                <div class="item-left-side">
+                    ${imageHtml}
+                    <div class="item-info">
+                        <span class="item-name">${item.name}</span>
+                        <div style="display: flex; align-items: center; gap: 8px; margin-top: 2px;">
+                            ${priceElementHtml}
+                            ${trendHtml}
+                        </div>
+                    </div>
                 </div>
                 <div class="controls">
-                    <button class="btn-circle minus" onclick="updateCountExport(${index}, -1)">-</button>
-                    <input type="number" id="count-export-${index}" class="quantity-input" value="${countsExport[index]}" min="0" oninput="handleInputExport(${index}, this.value)">
-                    <button class="btn-circle plus" onclick="updateCountExport(${index}, 1)">+</button>
+                    <button class="btn-circle minus" data-action="minus" data-index="${index}">-</button>
+                    <input type="number" class="quantity-input" data-index="${index}" value="${countsExport[index]}" min="0">
+                    <button class="btn-circle plus" data-action="add" data-index="${index}">+</button>
                 </div>
             `;
-            list.appendChild(card);
+            normalCards.push(card);
         }
     });
+    
+    customCards.forEach(c => list.appendChild(c));
+    normalCards.forEach(c => list.appendChild(c));
     
     applyFiltersExport();
 }
 
 window.addCustomItemSlotExport = function() {
     const index = exportInventory.length; 
-    
     exportInventory.push({ name: "Własny przedmiot", price: 0, category: "custom", isCustom: true });
-    countsExport[index] = 1;
-
+    countsExport[index] = 0;
     renderInventoryExport();
     calculateTotalExport();
-    showNotice("Dodano nowe pole na własny przedmiot (Eksport)!", "success");
+    showNotice("Dodano nowe pole na własny przedmiot!", "success");
 }
 
 window.updateCustomNameExport = function(i, val) {
@@ -903,23 +2047,30 @@ window.updateCustomPriceExport = function(i, val) {
     calculateTotalExport();
 }
 
-window.updateCountExport = function(i, change) {
-    countsExport[i] = Math.max(0, (countsExport[i] || 0) + change);
-    const input = document.getElementById(`count-export-${i}`);
-    if (input) input.value = countsExport[i];
+window.updateCountExport = function(index, change) {
+    countsExport[index] = Math.max(0, (countsExport[index] || 0) + change);
+    const container = document.getElementById('items-list-export');
+    if (container) {
+        const input = container.querySelector(`.quantity-input[data-index="${index}"]`);
+        if (input) input.value = countsExport[index];
+    }
     calculateTotalExport();
+    window.triggerPulseEffect('total-price-export', 'cart-badge-export');
 }
 
 window.handleInputExport = function(i, value) {
     countsExport[i] = Math.max(0, parseInt(value) || 0);
     calculateTotalExport();
+    window.triggerPulseEffect('total-price-export', 'cart-badge-export');
 }
 
 function calculateTotalExport() {
+    const prevTotal = currentTotalExport || 0;
     currentTotalExport = exportInventory.reduce((sum, item, i) => sum + (item.price * (countsExport[i] || 0)), 0);
     const totalDisplay = document.getElementById('total-price-export');
-    if (totalDisplay) totalDisplay.innerText = currentTotalExport + '$';
-    
+    if (totalDisplay) {
+        window.animateValue(totalDisplay, prevTotal, currentTotalExport, 400);
+    }
     updateCartViewExport();
 }
 
@@ -947,9 +2098,9 @@ window.updateCartViewExport = function() {
                     <div class="cart-item-info-col">
                         <span class="cart-item-name">${displayName}</span>
                         <div class="cart-controls">
-                            <button class="cart-btn-circle minus" onclick="updateCountExport(${index}, -1)">-</button>
+                            <button class="cart-btn-circle minus" data-action="minus" data-index="${index}">-</button>
                             <span class="cart-item-qty">${countsExport[index]}</span>
-                            <button class="cart-btn-circle plus" onclick="updateCountExport(${index}, 1)">+</button>
+                            <button class="cart-btn-circle plus" data-action="add" data-index="${index}">+</button>
                         </div>
                     </div>
                     <div class="cart-item-price-col">${itemTotal}$</div>
@@ -958,42 +2109,58 @@ window.updateCartViewExport = function() {
         }
     });
 
-    if (totalItems === 0) {
-        html = '<div class="empty-cart-msg">Brak dodanych przedmiotów</div>';
-    }
+    if (totalItems === 0) html = '<div class="empty-cart-msg">Brak przedmiotów</div>';
+            if (container) container.innerHTML = html;
+            if (badge) badge.innerText = totalItems;
+            if (sidebarTotal) sidebarTotal.innerText = currentTotalExport + '$';
+            
+            // --- NOWE: Błyskawiczne odświeżanie paska zakładek i kropki w Sprzedaży ---
+            if (typeof window.renderTabsUI === 'function') {
+                window.renderTabsUI();
+            }
+        };
 
-    if (container) container.innerHTML = html;
-    if (badge) badge.innerText = totalItems;
-    if (sidebarTotal) sidebarTotal.innerText = currentTotalExport + '$';
-};
-
-window.filterCategoryExport = function(cat, btn) {
-    currentCategoryExport = cat;
+window.filterCategoryExport = function(cat, btnElement) {
+    currentCategoryExport = cat || 'wszystkie';
     const viewExport = document.getElementById('view-export');
     if(viewExport) {
         viewExport.querySelectorAll('.categories-container .cat-btn').forEach(b => b.classList.remove('active'));
     }
-    if (btn) btn.classList.add('active');
+    if (btnElement) btnElement.classList.add('active');
     applyFiltersExport();
 }
 
 function applyFiltersExport() {
     const searchInputExportEl = document.getElementById('search-input-export');
-    const term = searchInputExportEl ? searchInputExportEl.value.toLowerCase() : "";
+    const term = searchInputExportEl ? window.removePolishDiacritics(searchInputExportEl.value) : "";
     const viewExport = document.getElementById('view-export');
     if(viewExport) {
         viewExport.querySelectorAll('.item-card:not(.custom-item)').forEach(card => {
-            const dataName = card.getAttribute('data-name');
+            const dataName = window.removePolishDiacritics(card.getAttribute('data-name') || '');
             if(dataName) {
-                const match = dataName.includes(term) && 
-                              (currentCategoryExport === 'wszystkie' || card.getAttribute('data-category') === currentCategoryExport);
-                card.classList.toggle('hidden', !match);
+                const match = dataName.includes(term) && (currentCategoryExport === 'wszystkie' || card.getAttribute('data-category') === currentCategoryExport);
+                if(match) card.classList.remove('hidden');
+                else card.classList.add('hidden');
             }
         });
     }
 }
 
 window.generateQuoteExport = async function() {
+    // WALIDACJA NIESTANDARDOWYCH PRODUKTÓW ORAZ DYNAMICZNYCH CEN
+    for (let i = 0; i < exportInventory.length; i++) {
+        if (countsExport[i] > 0 && exportInventory[i].isCustom) {
+            if (exportInventory[i].price <= 0 || exportInventory[i].name === "Własny przedmiot" || exportInventory[i].name.trim() === "") {
+                return showNotice("Uzupełnij poprawną nazwę i cenę (>0$) dla niestandardowych produktów!", "danger");
+            }
+        }
+        if (countsExport[i] > 0 && exportInventory[i].dynamicPrice) {
+            if (exportInventory[i].price <= 0) {
+                return showNotice(`Uzupełnij cenę dla produktu: ${exportInventory[i].name}!`, "danger");
+            }
+        }
+    }
+
     if (!Object.values(countsExport).some(c => c > 0)) return showNotice("Koszyk eksportu jest pusty!", "warning");
     
     const ssnInput = document.getElementById('customer-ssn-input-export');
@@ -1014,15 +2181,13 @@ window.generateQuoteExport = async function() {
 
 window.finalizeQuoteExport = function(employeeName) {
     lastGeneratedReportID = `EXP-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
-    const date = getFormattedDate();
+    const date = getFormattedDateTime();
     
     let employeeText = `PRACOWNIK: ${employeeName.toUpperCase()}`;
-    if (currentCustomerSSNExport !== "") {
-        employeeText += `<br>KLIENT (SSN): ${currentCustomerSSNExport}`;
-    }
+    if (currentCustomerSSNExport !== "") employeeText += `<br>KLIENT [SSN]: ${currentCustomerSSNExport}`;
 
     const receiptHTML = `
-        <div class="receipt">
+        <div class="receipt receipt-shake">
             <div class="receipt-header">
                 <h2>EL CARTEL EXPORT</h2>
                 <p class="receipt-meta">Raport sprzedaży przedmiotów</p>
@@ -1049,7 +2214,7 @@ window.finalizeQuoteExport = function(employeeName) {
                 <span>RAZEM:</span>
                 <span>${currentTotalExport}$</span>
             </div>
-            <p class="receipt-meta" style="margin-top: 15px;">Data wystawienia: ${date}</p>
+            <p class="receipt-meta mt-15">Data wystawienia: ${date}</p>
             <div class="receipt-stamp">SPRZEDANO</div>
         </div>
     `;
@@ -1068,8 +2233,11 @@ window.finalizeQuoteExport = function(employeeName) {
 window.sendToDiscordExport = async function() {
     const btn = document.getElementById('send-discord-btn-export');
     const area = document.getElementById('receipt-capture-area-export');
-    
     if (!area || !btn) return;
+
+    // ANTI-SPAM GUARD EXPORT
+    if (window.isExportProcessing) return;
+    window.isExportProcessing = true;
 
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> PRZETWARZANIE...';
@@ -1078,11 +2246,7 @@ window.sendToDiscordExport = async function() {
     exportInventory.forEach((item, i) => {
         if (countsExport[i] > 0) {
             let dName = item.isCustom ? (item.name || "Własny przedmiot") : item.name;
-            itemsToLog.push({
-                name: dName,
-                qty: countsExport[i],
-                total: item.price * countsExport[i]
-            });
+            itemsToLog.push({ name: dName, qty: countsExport[i], total: item.price * countsExport[i] });
         }
     });
 
@@ -1092,47 +2256,94 @@ window.sendToDiscordExport = async function() {
         date: getFormattedDateTime(),
         employee: currentEmployeeName,
         report_id: lastGeneratedReportID,
-        items: itemsToLog
+        items: itemsToLog,
+        ssn: currentCustomerSSNExport 
     };
 
     try {
-        const canvas = await html2canvas(area, { scale: 3, backgroundColor: "#ffffff", useCORS: true });
+        const canvas = await html2canvas(area, { 
+            scale: 3, 
+            backgroundColor: "#ffffff", 
+            useCORS: true,
+            onclone: (clonedDoc) => {
+                const clonedArea = clonedDoc.getElementById('receipt-capture-area-export');
+                if (clonedArea) {
+                    const receiptEl = clonedArea.querySelector('.receipt');
+                    const stampEl = clonedArea.querySelector('.receipt-stamp');
+                    if (receiptEl) {
+                        receiptEl.style.setProperty('animation', 'none', 'important');
+                        receiptEl.style.setProperty('transform', 'translate(0, 0)', 'important');
+                    }
+                    if (stampEl) {
+                        stampEl.style.setProperty('animation', 'none', 'important');
+                        stampEl.style.setProperty('transform', 'scale(1) rotate(-15deg)', 'important');
+                        stampEl.style.setProperty('opacity', '0.8', 'important');
+                    }
+                }
+            }
+        });
+
         canvas.toBlob(async (blob) => {
             const formData = new FormData();
             formData.append("file", blob, "raport.png");
             
             let employeeFieldValue = `\`${currentEmployeeName}\``;
-            if (currentCustomerSSNExport !== "") {
-                employeeFieldValue += `\n(Klient SSN: **${currentCustomerSSNExport}**)`;
-            }
+
+            // PANCERNY UKŁAD 2-KOLUMNOWY
+            const embedFields = [
+                { 
+                    name: "Dane raportu", 
+                    value: `**📋 Nr raportu:**\n\`${lastGeneratedReportID}\`\n\n**🤝 Klient [SSN]:**\n\`${currentCustomerSSNExport !== "" ? currentCustomerSSNExport : "-"}\``, 
+                    inline: true 
+                },
+                { 
+                    name: "Rozliczenie", 
+                    value: `**👤 Pracownik:**\n${employeeFieldValue}\n\n**💰 Suma:**\n**${currentTotalExport}$**`, 
+                    inline: true 
+                }
+            ];
 
             const embedPayload = {
+                username: currentEmployeeName || "Pracownik",
                 embeds: [{
                     title: "🚛 NOWY RAPORT SPRZEDAŻY",
                     color: 15995922,
-                    fields: [
-                        { name: "👤 Pracownik:", value: employeeFieldValue, inline: true },
-                        { name: "📋 Nr raportu:", value: `\`${lastGeneratedReportID}\``, inline: true },
-                        { name: "💰 Suma:", value: `\`${currentTotalExport}$\``, inline: false }
-                    ],
+                    fields: embedFields,
                     image: { url: "attachment://raport.png" },
                     timestamp: new Date().toISOString(),
                     footer: { text: "System EL CARTEL EXPORT" }
                 }]
             };
 
+            if (currentEmployeePhoto && currentEmployeePhoto.trim() !== "") {
+                embedPayload.avatar_url = currentEmployeePhoto;
+            }
+
             formData.append("payload_json", JSON.stringify(embedPayload));
 
             const res = await fetch(DISCORD_WEBHOOK_URL_EXPORT, { method: "POST", body: formData });
             if (res.ok) {
-                fetch(REPORTS_API_URL, {
-                    method: "POST",
-                    body: JSON.stringify(logPayload)
-                }).catch(e => console.error("Błąd zapisu w arkuszu:", e));
+                // ZAPIS DO BAZY PRZEZ WORKERA (TŁUMACZA)
+                fetch(REPORTS_API_URL, { 
+                    method: "POST", 
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(logPayload) 
+                }).catch(e => console.error("Błąd zapisu:", e));
 
+                // Wstaw to przed showNotice("Wysłano raport na Discord!");
+                window.updateWarehouse(itemsToLog, 'remove');
                 showNotice("Wysłano raport na Discord!", "success");
+
+                window.addSystemLog('SPRZEDAŻ', `Zrealizowano sprzedaż [${lastGeneratedReportID}] na kwotę: ${currentTotalExport}$`);
+
                 closeModalExport();
                 resetCartAndInventoryExport();
+                
+                // Inwalidacja cache po dodaniu nowego wpisu
+                window.reportsFetchPromise = null;
+                window.bonusesFetchPromise = null;
+                window.errorReportsFetchPromise = null;
+                updateOnlineEmployees(); 
             } else {
                 showNotice("Błąd Webhooka!", "danger");
             }
@@ -1140,8 +2351,20 @@ window.sendToDiscordExport = async function() {
     } catch (e) {
         showNotice("Błąd generatora obrazu!", "danger");
     } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fab fa-discord"></i> Wyślij raport na Discord';
+        // VISUAL COOLDOWN ANTYSZPAMOWY EXPORT (2 SEKUNDY)
+        let cooldownTime = 2;
+        btn.innerHTML = `<i class="fas fa-lock"></i> Cooldown (${cooldownTime}s)`;
+        const interval = setInterval(() => {
+            cooldownTime--;
+            if (cooldownTime <= 0) {
+                clearInterval(interval);
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fab fa-discord"></i> Wyślij raport na Discord';
+                window.isExportProcessing = false;
+            } else {
+                btn.innerHTML = `<i class="fas fa-lock"></i> Cooldown (${cooldownTime}s)`;
+            }
+        }, 1000);
     }
 }
 
@@ -1155,23 +2378,17 @@ window.toggleSummaryExport = function() {
     const icon = document.getElementById('toggle-icon-export');
     if (bar && icon) {
         bar.classList.toggle('open');
-        if (bar.classList.contains('open')) {
-            icon.classList.replace('fa-chevron-up', 'fa-chevron-down');
-        } else {
-            icon.classList.replace('fa-chevron-down', 'fa-chevron-up');
-        }
+        if (bar.classList.contains('open')) icon.classList.replace('fa-chevron-up', 'fa-chevron-down');
+        else icon.classList.replace('fa-chevron-down', 'fa-chevron-up');
     }
 }
 
-// ==========================================
-// SYSTEM POWIADOMIEŃ I DYNAMICZNEGO CHANGELOGA (WSPÓLNY)
-// ==========================================
 async function fetchChangelogData() {
     try {
         const response = await fetch(`${REPORTS_API_URL}?action=get_reports&t=${new Date().getTime()}`);
         const data = await response.json();
-        
         const clData = data.filter(r => r.type === "changelog");
+        
         if (clData.length > 0) {
             const grouped = {};
             clData.forEach(r => {
@@ -1180,7 +2397,6 @@ async function fetchChangelogData() {
             });
             
             const sortedVersions = Object.keys(grouped).reverse();
-            
             const container = document.getElementById('dynamic-changelog-container');
             if(container && sortedVersions.length > 0) {
                 LATEST_CHANGELOG_VERSION = sortedVersions[0]; 
@@ -1199,28 +2415,19 @@ async function fetchChangelogData() {
                     }
                     
                     const dateLabel = index === 0 ? "Najnowsza" : displayDate;
-                    
                     let listHtml = "";
-                    
-                    let displayVersion = v;
-                    if (v.startsWith('v')) {
-                        displayVersion = v.substring(1);
-                    }
+                    let displayVersion = v.startsWith('v') ? v.substring(1) : v;
                     
                     grouped[v].items.forEach(itemStr => {
-                        let tag = "INFO";
-                        let desc = itemStr;
+                        let tag = "INFO", desc = itemStr;
                         if(itemStr.includes('|||')) {
                             const parts = itemStr.split('|||');
-                            tag = parts[0];
-                            desc = parts[1];
+                            tag = parts[0]; desc = parts[1];
                         }
-                        
                         let clClass = "cl-tag";
                         if (tag === "NOWOŚĆ") clClass = "cl-new";
                         else if (tag === "POPRAWKA") clClass = "cl-fix";
                         else if (tag === "USUNIĘTO") clClass = "cl-del";
-
                         listHtml += `<li><span class="cl-tag ${clClass}">${tag}</span> ${desc}</li>`;
                     });
 
@@ -1228,9 +2435,9 @@ async function fetchChangelogData() {
                     if (isTravisVance()) {
                         const safeItems = encodeURIComponent(JSON.stringify(grouped[v].items));
                         adminControls = `
-                            <div style="margin-left: auto; display: flex; gap: 12px;">
-                                <button onclick="openEditChangelog('${v}', '${safeItems}')" style="background: none; border: none; color: var(--accent-color); cursor: pointer; font-size: 1.1rem; transition: 0.2s;" onmouseover="this.style.color='white'" onmouseout="this.style.color='var(--accent-color)'"><i class="fas fa-edit"></i></button>
-                                <button onclick="deleteChangelog('${v}')" style="background: none; border: none; color: var(--danger); cursor: pointer; font-size: 1.1rem; transition: 0.2s;" onmouseover="this.style.color='white'" onmouseout="this.style.color='var(--danger)'"><i class="fas fa-trash"></i></button>
+                            <div class="admin-controls-layout">
+                                <button class="btn-admin-edit" data-action="edit-cl" data-version="${v}" data-items="${safeItems}"><i class="fas fa-edit"></i></button>
+                                <button class="btn-admin-del" data-action="delete-cl" data-version="${v}"><i class="fas fa-trash"></i></button>
                             </div>
                         `;
                     }
@@ -1248,17 +2455,13 @@ async function fetchChangelogData() {
                 checkChangelogNotification();
             }
         }
-    } catch(e) {
-        console.log("Nie udało się pobrać dynamicznego changeloga", e);
-        checkChangelogNotification(); 
-    }
+    } catch(e) { console.log(e); checkChangelogNotification(); }
 }
 
 function checkChangelogNotification() {
     const seenVersion = localStorage.getItem('elcartel_changelog_seen');
     const navDot = document.getElementById('nav-notification-dot');
     const dropDot = document.getElementById('dropdown-notification-dot');
-    
     if (seenVersion !== LATEST_CHANGELOG_VERSION) {
         if (navDot) navDot.classList.remove('hidden');
         if (dropDot) dropDot.classList.remove('hidden');
@@ -1271,157 +2474,98 @@ function checkChangelogNotification() {
 window.openChangelog = function() {
     document.getElementById('user-dropdown').classList.remove('active');
     document.getElementById('changelog-modal').classList.add('active');
-    
     localStorage.setItem('elcartel_changelog_seen', LATEST_CHANGELOG_VERSION);
     checkChangelogNotification(); 
 }
 
-window.closeChangelog = function() {
-    document.getElementById('changelog-modal').classList.remove('active');
-}
+window.closeChangelog = function() { document.getElementById('changelog-modal').classList.remove('active'); }
 
-// ==========================================
-// ADMIN: DODAWANIE CHANGELOGA
-// ==========================================
 window.openAdminChangelog = function() {
     if (!isTravisVance()) return showNotice("Brak uprawnień!", "danger");
-
     document.getElementById('user-dropdown').classList.remove('active');
     document.getElementById('admin-changelog-modal').classList.add('active');
-    if(document.getElementById('admin-changes-list').children.length === 0) {
-        addAdminChangeSlot();
-    }
+    if(document.getElementById('admin-changes-list').children.length === 0) addAdminChangeSlot();
 }
 
-window.closeAdminChangelog = function() {
-    document.getElementById('admin-changelog-modal').classList.remove('active');
-}
+window.closeAdminChangelog = function() { document.getElementById('admin-changelog-modal').classList.remove('active'); }
 
 window.addAdminChangeSlot = function() {
     if (!isTravisVance()) return;
     const container = document.getElementById('admin-changes-list');
     const div = document.createElement('div');
-    div.style.display = 'flex';
-    div.style.gap = '10px';
-    div.style.alignItems = 'center';
+    div.className = "admin-change-slot-layout";
+    div.draggable = true;
     div.innerHTML = `
-        <select class="custom-input admin-change-tag" style="width: 120px; padding: 10px;">
-            <option value="NOWOŚĆ">NOWOŚĆ</option>
-            <option value="POPRAWKA">POPRAWKA</option>
-            <option value="USUNIĘTO">USUNIĘTO</option>
-        </select>
-        <input type="text" class="custom-input admin-change-desc" placeholder="Opis zmiany..." style="flex: 1; padding: 10px;">
-        <button type="button" class="settings-close-btn" style="width: 40px; height: 40px; flex-shrink: 0;" onclick="this.parentElement.remove()">
-            <i class="fas fa-trash"></i>
-        </button>
+        <div style="cursor: grab; padding: 0 10px; color: var(--text-secondary); display: flex; align-items: center;" class="drag-handle"><i class="fas fa-grip-vertical"></i></div>
+        <select class="custom-input admin-change-tag admin-change-select"><option value="NOWOŚĆ">NOWOŚĆ</option><option value="POPRAWKA">POPRAWKA</option><option value="USUNIĘTO">USUNIĘTO</option></select>
+        <input type="text" class="custom-input admin-change-desc admin-change-input" placeholder="Opis zmiany...">
+        <button type="button" class="settings-close-btn btn-delete-slot" data-action="remove-slot" title="Usuń"><i class="fas fa-trash"></i></button>
     `;
     container.appendChild(div);
 }
 
 window.publishChangelog = async function() {
     if (!isTravisVance()) return showNotice("Brak uprawnień!", "danger");
-
     const version = document.getElementById('admin-version-input').value.trim();
     if (!version) return showNotice("Podaj numer wersji!", "warning");
-    
     const rows = document.querySelectorAll('#admin-changes-list > div');
     if (rows.length === 0) return showNotice("Dodaj co najmniej jedną zmianę!", "warning");
     
-    let itemsToLog = [];
-    let valid = true;
-    
+    let itemsToLog = [], valid = true;
     rows.forEach(row => {
         const tag = row.querySelector('.admin-change-tag').value;
         const desc = row.querySelector('.admin-change-desc').value.trim();
         if (!desc) valid = false;
-        
-        itemsToLog.push({
-            name: `${tag}|||${desc}`,
-            qty: 1,
-            total: 0
-        });
+        itemsToLog.push({ name: `${tag}|||${desc}`, qty: 1, total: 0 });
     });
     
-    if (!valid) return showNotice("Wypełnij opisy wszystkich zmian!", "warning");
-    
+    if (!valid) return showNotice("Wypełnij opisy!", "warning");
     const btn = document.getElementById('publish-changelog-btn');
     const originalHtml = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Zapisywanie...';
-    
-    const safeVersion = "v" + version;
-    
-    const logPayload = {
-        action: "save_receipt",
-        type: "changelog",
-        date: getFormattedDateTime(),
-        employee: currentEmployeeName,
-        report_id: safeVersion, 
-        items: itemsToLog
-    };
+    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Zapisywanie...';
     
     try {
         await fetch(REPORTS_API_URL, {
             method: "POST",
-            body: JSON.stringify(logPayload)
+            body: JSON.stringify({ action: "save_receipt", type: "changelog", date: getFormattedDateTime(), employee: currentEmployeeName, report_id: "v" + version, items: itemsToLog })
         });
-        
-        showNotice("Changelog opublikowany pomyślnie!", "success");
+        showNotice("Changelog opublikowany!", "success");
+        window.addSystemLog('CHANGELOG', `Opublikowano nową wersję systemu: v${version}`);
         closeAdminChangelog();
         document.getElementById('admin-version-input').value = "";
         document.getElementById('admin-changes-list').innerHTML = "";
-        
         fetchChangelogData(); 
-        
-    } catch(e) {
-        showNotice("Błąd publikacji!", "danger");
-        console.error(e);
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = originalHtml;
-    }
+    } catch(e) { showNotice("Błąd publikacji!", "danger"); } 
+    finally { btn.disabled = false; btn.innerHTML = originalHtml; }
 }
 
 window.openEditChangelog = function(version, itemsJson) {
     if (!isTravisVance()) return showNotice("Brak uprawnień!", "danger");
-
     document.getElementById('changelog-modal').classList.remove('active'); 
     const items = JSON.parse(decodeURIComponent(itemsJson));
     document.getElementById('edit-cl-original-version').value = version;
-    
-    let displayVersion = version.startsWith('v') ? version.substring(1) : version;
-    document.getElementById('edit-cl-version-input').value = displayVersion;
+    document.getElementById('edit-cl-version-input').value = version.startsWith('v') ? version.substring(1) : version;
     
     const container = document.getElementById('edit-cl-changes-list');
     container.innerHTML = "";
-    
     items.forEach(itemStr => {
-        let tag = "INFO";
-        let desc = itemStr;
-        if(itemStr.includes('|||')) {
-            const parts = itemStr.split('|||');
-            tag = parts[0];
-            desc = parts[1];
-        }
-        
+        let tag = "INFO", desc = itemStr;
+        if(itemStr.includes('|||')) { const parts = itemStr.split('|||'); tag = parts[0]; desc = parts[1]; }
         const div = document.createElement('div');
-        div.style.display = 'flex';
-        div.style.gap = '10px';
-        div.style.alignItems = 'center';
+        div.className = "admin-change-slot-layout";
+        div.draggable = true;
         div.innerHTML = `
-            <select class="custom-input admin-change-tag" style="width: 120px; padding: 10px;">
+            <div style="cursor: grab; padding: 0 10px; color: var(--text-secondary); display: flex; align-items: center;" class="drag-handle"><i class="fas fa-grip-vertical"></i></div>
+            <select class="custom-input admin-change-tag admin-change-select">
                 <option value="NOWOŚĆ" ${tag==='NOWOŚĆ'?'selected':''}>NOWOŚĆ</option>
                 <option value="POPRAWKA" ${tag==='POPRAWKA'?'selected':''}>POPRAWKA</option>
                 <option value="USUNIĘTO" ${tag==='USUNIĘTO'?'selected':''}>USUNIĘTO</option>
             </select>
-            <input type="text" class="custom-input admin-change-desc" value="${desc.replace(/"/g, '&quot;')}" style="flex: 1; padding: 10px;">
-            <button type="button" class="settings-close-btn" style="width: 40px; height: 40px; flex-shrink: 0;" onclick="this.parentElement.remove()">
-                <i class="fas fa-trash"></i>
-            </button>
+            <input type="text" class="custom-input admin-change-desc admin-change-input" value="${desc.replace(/"/g, '&quot;')}">
+            <button type="button" class="settings-close-btn btn-delete-slot" data-action="remove-slot" title="Usuń"><i class="fas fa-trash"></i></button>
         `;
         container.appendChild(div);
     });
-    
     document.getElementById('edit-changelog-modal').classList.add('active');
 }
 
@@ -1434,35 +2578,27 @@ window.addEditChangeSlot = function() {
     if (!isTravisVance()) return;
     const container = document.getElementById('edit-cl-changes-list');
     const div = document.createElement('div');
-    div.style.display = 'flex';
-    div.style.gap = '10px';
-    div.style.alignItems = 'center';
+    div.className = "admin-change-slot-layout";
+    div.draggable = true;
     div.innerHTML = `
-        <select class="custom-input admin-change-tag" style="width: 120px; padding: 10px;">
-            <option value="NOWOŚĆ">NOWOŚĆ</option>
-            <option value="POPRAWKA">POPRAWKA</option>
-            <option value="USUNIĘTO">USUNIĘTO</option>
-        </select>
-        <input type="text" class="custom-input admin-change-desc" placeholder="Opis zmiany..." style="flex: 1; padding: 10px;">
-        <button type="button" class="settings-close-btn" style="width: 40px; height: 40px; flex-shrink: 0;" onclick="this.parentElement.remove()">
-            <i class="fas fa-trash"></i>
-        </button>
+        <div style="cursor: grab; padding: 0 10px; color: var(--text-secondary); display: flex; align-items: center;" class="drag-handle"><i class="fas fa-grip-vertical"></i></div>
+        <select class="custom-input admin-change-tag admin-change-select"><option value="NOWOŚĆ">NOWOŚĆ</option><option value="POPRAWKA">POPRAWKA</option><option value="USUNIĘTO">USUNIĘTO</option></select>
+        <input type="text" class="custom-input admin-change-desc admin-change-input" placeholder="Opis zmiany...">
+        <button type="button" class="settings-close-btn btn-delete-slot" data-action="remove-slot" title="Usuń"><i class="fas fa-trash"></i></button>
     `;
     container.appendChild(div);
 }
 
 window.saveEditedChangelog = async function() {
     if (!isTravisVance()) return showNotice("Brak uprawnień!", "danger");
-
     const origVersion = document.getElementById('edit-cl-original-version').value;
     const newVersion = document.getElementById('edit-cl-version-input').value.trim();
     if(!newVersion) return showNotice("Podaj numer wersji!", "warning");
     
     const rows = document.querySelectorAll('#edit-cl-changes-list > div');
-    if(rows.length === 0) return showNotice("Musisz podać chociaż jedną zmianę!", "warning");
+    if(rows.length === 0) return showNotice("Podaj chociaż jedną zmianę!", "warning");
     
-    let itemsToLog = [];
-    let valid = true;
+    let itemsToLog = [], valid = true;
     rows.forEach(row => {
         const tag = row.querySelector('.admin-change-tag').value;
         const desc = row.querySelector('.admin-change-desc').value.trim();
@@ -1470,61 +2606,35 @@ window.saveEditedChangelog = async function() {
         itemsToLog.push({ name: `${tag}|||${desc}`, qty: 1, total: 0 });
     });
     
-    if(!valid) return showNotice("Wypełnij puste opisy!", "warning");
-    
-    const safeNewVersion = newVersion.startsWith('v') ? newVersion : 'v' + newVersion;
-    
+    if(!valid) return showNotice("Wypełnij opisy!", "warning");
     const btn = document.getElementById('save-edit-cl-btn');
     const origHtml = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Zapisywanie...';
+    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Zapisywanie...';
     
     try {
         await fetch(REPORTS_API_URL, {
             method: 'POST',
-            body: JSON.stringify({
-                action: 'edit_changelog',
-                original_version: origVersion,
-                new_version: safeNewVersion,
-                items: itemsToLog,
-                employee: currentEmployeeName,
-                date: getFormattedDateTime()
-            })
+            body: JSON.stringify({ action: 'edit_changelog', original_version: origVersion, new_version: newVersion.startsWith('v') ? newVersion : 'v' + newVersion, items: itemsToLog, employee: currentEmployeeName, date: getFormattedDateTime() })
         });
         showNotice("Zaktualizowano changelog!", "success");
+        window.addSystemLog('CHANGELOG', `Zaktualizowano wpis changeloga dla wersji: ${newVersion}`);
         closeEditChangelog();
         fetchChangelogData();
-    } catch(e) {
-        showNotice("Błąd edycji!", "danger");
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = origHtml;
-    }
+    } catch(e) { showNotice("Błąd edycji!", "danger"); } 
+    finally { btn.disabled = false; btn.innerHTML = origHtml; }
 }
 
 window.deleteChangelog = async function(version) {
     if (!isTravisVance()) return showNotice("Brak uprawnień!", "danger");
-
-    if(!confirm("Na pewno usunąć tę wersję changelogu: " + version + "?")) return;
-    
+    if(!confirm("Na pewno usunąć: " + version + "?")) return;
     try {
-        await fetch(REPORTS_API_URL, {
-            method: 'POST',
-            body: JSON.stringify({
-                action: 'delete_changelog',
-                version: version
-            })
-        });
-        showNotice("Usunięto wersję " + version + "!", "success");
+        await fetch(REPORTS_API_URL, { method: 'POST', body: JSON.stringify({ action: 'delete_changelog', version: version }) });
+        showNotice("Usunięto " + version + "!", "success");
+        window.addSystemLog('CHANGELOG', `Usunięto wpis changeloga: ${version}`);
         fetchChangelogData(); 
-    } catch(e) {
-        showNotice("Błąd usuwania!", "danger");
-    }
+    } catch(e) { showNotice("Błąd usuwania!", "danger"); }
 }
 
-// ==========================================
-// SYSTEM USTAWIEŃ
-// ==========================================
 window.openSettings = function() {
     document.getElementById('user-dropdown').classList.remove('active');
     document.getElementById('settings-modal').classList.add('active');
@@ -1549,66 +2659,40 @@ window.changeEmployeePin = async function() {
 
     const btn = document.getElementById('change-pin-btn');
     const originalHtml = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Zapisywanie...';
+    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Zapisywanie...';
 
     try {
-        const response = await fetch(PIN_API_URL, {
-            method: 'POST',
-            body: JSON.stringify({
-                action: 'change_pin',
-                old_pin: oldPin,
-                new_pin: newPin,
-                name: currentEmployeeName
-            })
-        });
-        
+        const response = await fetch(PIN_API_URL, { method: 'POST', body: JSON.stringify({ action: 'change_pin', old_pin: oldPin, new_pin: newPin, name: currentEmployeeName }) });
         const data = await response.json();
-        
-        if (data.success) {
-            showNotice("Twój PIN został pomyślnie zmieniony!", "success");
-            closeSettings();
-        } else {
-            showNotice(data.message || "Błąd zmiany PINu! Prawdopodobnie wpisałeś zły obecny PIN.", "danger");
-        }
-    } catch (e) {
-        showNotice("Błąd połączenia z bazą danych!", "danger");
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = originalHtml;
-    }
+        if (data.success) { 
+            showNotice("PIN zmieniony!", "success"); 
+            window.addSystemLog('USTAWIENIA', 'Pracownik zmienił swój kod PIN.');
+            closeSettings(); 
+        } 
+        else { showNotice(data.message || "Błąd zmiany PINu!", "danger"); }
+    } catch (e) { showNotice("Błąd połączenia!", "danger"); } 
+    finally { btn.disabled = false; btn.innerHTML = originalHtml; }
 }
 
-// ==========================================
-// MOJE STATYSTYKI (WSPÓLNY)
-// ==========================================
 window.openMyStats = async function() {
     document.getElementById('user-dropdown').classList.remove('active');
     document.getElementById('my-stats-modal').classList.add('active');
-    
     document.getElementById('my-stats-loader').classList.remove('hidden');
     document.getElementById('my-stats-content').classList.add('hidden');
     
     try {
-        const response = await fetch(`${REPORTS_API_URL}?action=get_reports&t=${new Date().getTime()}`);
-        const rawData = await response.json();
-        
-        myStatsRawData = rawData.filter(row => row.employee === currentEmployeeName);
-        
+        const data = await window.preloadReportsData();
+        myStatsRawData = data.filter(row => row.employee === currentEmployeeName);
         document.getElementById('my-stats-time-filter').value = 'today';
         currentStatsType = currentActiveView === 'export' ? 'sprzedaz' : 'skup';
         currentStatsRange = 'today';
-        
         document.getElementById('btn-stats-skup').classList.toggle('active', currentStatsType === 'skup');
         document.getElementById('btn-stats-sprzedaz').classList.toggle('active', currentStatsType === 'sprzedaz');
-
         renderMyStatsDisplay();
-        
         document.getElementById('my-stats-loader').classList.add('hidden');
         document.getElementById('my-stats-content').classList.remove('hidden');
-        
     } catch (err) {
-        document.getElementById('my-stats-loader').innerHTML = '<p style="color:var(--danger);"><i class="fas fa-exclamation-triangle"></i> Błąd pobierania danych.</p>';
+        document.getElementById('my-stats-loader').innerHTML = '<p class="text-danger-icon"><i class="fas fa-exclamation-triangle"></i> Błąd pobierania danych.</p>';
     }
 }
 
@@ -1626,13 +2710,7 @@ window.changeStatsTimeRange = function(range) {
 
 window.renderMyStatsDisplay = function() {
     const typeData = myStatsRawData.filter(row => row.employee === currentEmployeeName && row.type === currentStatsType);
-    
-    let periodTotal = 0;
-    let allTimeTotal = 0;
-    let txSet = new Set();
-    let itemCounts = {};
-    let periodItemsQty = 0;
-    
+    let periodTotal = 0, allTimeTotal = 0, txSet = new Set(), itemCounts = {}, periodItemsQty = 0;
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const startOfYesterday = startOfToday - (24 * 60 * 60 * 1000);
@@ -1641,24 +2719,16 @@ window.renderMyStatsDisplay = function() {
 
     typeData.forEach(row => {
         allTimeTotal += row.total; 
-        
         let rowTime = 0;
         const d = parseDate(row.date);
         if(d) rowTime = d.getTime();
 
         let isInRange = false;
-        
-        if (currentStatsRange === 'all') {
-            isInRange = true;
-        } else if (currentStatsRange === 'today') {
-            if (rowTime >= startOfToday) isInRange = true;
-        } else if (currentStatsRange === 'yesterday') {
-            if (rowTime >= startOfYesterday && rowTime < startOfToday) isInRange = true;
-        } else if (currentStatsRange === '7days') {
-            if (rowTime >= startOf7Days) isInRange = true;
-        } else if (currentStatsRange === 'month') {
-            if (rowTime >= startOfMonth) isInRange = true;
-        }
+        if (currentStatsRange === 'all') isInRange = true;
+        else if (currentStatsRange === 'today') { if (rowTime >= startOfToday) isInRange = true; } 
+        else if (currentStatsRange === 'yesterday') { if (rowTime >= startOfYesterday && rowTime < startOfToday) isInRange = true; } 
+        else if (currentStatsRange === '7days') { if (rowTime >= startOf7Days) isInRange = true; } 
+        else if (currentStatsRange === 'month') { if (rowTime >= startOfMonth) isInRange = true; }
         
         if (isInRange) {
             periodTotal += row.total;
@@ -1671,44 +2741,29 @@ window.renderMyStatsDisplay = function() {
 
     let displayPeriodTotal = periodTotal;
     if (currentStatsRange === 'today' && currentStatsType === 'skup') {
-        let localToday = getDailyStat(currentEmployeeName);
-        displayPeriodTotal = Math.max(periodTotal, localToday); 
+        displayPeriodTotal = Math.max(periodTotal, getDailyStat(currentEmployeeName)); 
     }
     
-    let topItem = "Brak";
-    let maxQty = 0;
+    let topItem = "Brak", maxQty = 0;
     for (const [name, qty] of Object.entries(itemCounts)) {
-        if (qty > maxQty) {
-            maxQty = qty;
-            topItem = name;
-        }
+        if (qty > maxQty) { maxQty = qty; topItem = name; }
     }
 
     let txCount = txSet.size;
-    if (txCount === 0 && displayPeriodTotal > 0) {
-        txCount = Object.keys(itemCounts).length > 0 ? 1 : 0; 
-    }
-
+    if (txCount === 0 && displayPeriodTotal > 0) txCount = Object.keys(itemCounts).length > 0 ? 1 : 0; 
     let avgTx = txCount > 0 ? Math.round(displayPeriodTotal / txCount) : 0;
     
-    document.getElementById('ms-today').innerText = displayPeriodTotal + '$';
-    document.getElementById('ms-alltime').innerText = allTimeTotal + '$';
-    document.getElementById('ms-count').innerText = txCount;
-    document.getElementById('ms-avg').innerText = avgTx + '$';
-    document.getElementById('ms-items').innerText = periodItemsQty;
-    
-    if (topItem.length > 15) topItem = topItem.substring(0, 15) + '...';
-    document.getElementById('ms-topitem').innerText = topItem;
-
-    const labelAction = currentStatsType === 'skup' ? 'Skupione' : 'Sprzedane';
+    // Uruchomienie animacji: (element, wartość, czas_trwania_w_ms, czy_dodac_formatowanie_pieniedzy)
+    window.animateCountUp(document.getElementById('ms-today'), displayPeriodTotal, 1500, true);
+    window.animateCountUp(document.getElementById('ms-alltime'), allTimeTotal, 2000, true); // Dłuższy czas, bo to gruba kwota
+    window.animateCountUp(document.getElementById('ms-count'), txCount, 1500, false);
+    window.animateCountUp(document.getElementById('ms-avg'), avgTx, 1500, true);
+    window.animateCountUp(document.getElementById('ms-items'), periodItemsQty, 1500, false);
+    document.getElementById('ms-topitem').innerText = topItem.length > 15 ? topItem.substring(0, 15) + '...' : topItem;
     const labelEl = document.getElementById('ms-label-items');
-    if(labelEl) labelEl.innerText = `${labelAction} sztuki`;
-    
+    if(labelEl) labelEl.innerText = currentStatsType === 'skup' ? 'Skupione sztuki' : 'Sprzedane sztuki';
     const descEl = document.getElementById('my-stats-desc');
-    if (descEl) {
-        descEl.innerText = currentStatsType === 'skup' ? 'Podsumowanie Twojej aktywności w firmie (skup).' : 'Podsumowanie Twojej aktywności w firmie (sprzedaż).';
-    }
-
+    if (descEl) descEl.innerText = currentStatsType === 'skup' ? 'Podsumowanie Twojej aktywności w firmie (skup).' : 'Podsumowanie Twojej aktywności w firmie (sprzedaż).';
     const periodLabelEl = document.getElementById('ms-label-period');
     if (periodLabelEl) {
         if (currentStatsRange === 'today') periodLabelEl.innerText = 'Dzisiejszy obrót';
@@ -1717,37 +2772,148 @@ window.renderMyStatsDisplay = function() {
         else if (currentStatsRange === 'month') periodLabelEl.innerText = 'Obrót (Miesiąc)';
         else periodLabelEl.innerText = 'Obrót (Całkowity)';
     }
+
+    // --- DYNAMICZNE TWORZENIE I WYWOŁYWANIE WYKRESU ---
+    let chartContainer = document.getElementById('my-stats-chart-container');
+    if (!chartContainer) {
+        chartContainer = document.createElement('div');
+        chartContainer.id = 'my-stats-chart-container';
+        chartContainer.className = 'my-stats-chart-wrapper';
+        chartContainer.innerHTML = '<canvas id="myStatsChart"></canvas>';
+        document.getElementById('my-stats-content').appendChild(chartContainer);
+    }
+    
+    // Przekazujemy zebrane ilości przedmiotów oraz typ widoku do wykresu
+    renderChart(itemCounts, currentStatsType);
+}
+
+let myChartInstance = null;
+window.renderChart = function(itemCounts, statsType) {
+    if (typeof Chart === 'undefined') {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+        script.onload = () => drawChart(itemCounts, statsType);
+        document.head.appendChild(script);
+    } else {
+        drawChart(itemCounts, statsType);
+    }
+}
+
+window.drawChart = function(itemCounts, statsType) {
+    const ctx = document.getElementById('myStatsChart').getContext('2d');
+    if (myChartInstance) myChartInstance.destroy();
+
+    // Sortowanie przedmiotów od najczęściej obracanego
+    const sortedItems = Object.entries(itemCounts).sort((a, b) => b[1] - a[1]);
+    
+    // Wyciągnięcie TOP 5, reszta ląduje w "Inne"
+    const topItems = sortedItems.slice(0, 5);
+    const otherItems = sortedItems.slice(5);
+    let othersQty = otherItems.reduce((sum, item) => sum + item[1], 0);
+
+    const labels = topItems.map(item => item[0]);
+    const data = topItems.map(item => item[1]);
+
+    if (othersQty > 0) {
+        labels.push('Pozostałe');
+        data.push(othersQty);
+    }
+
+    if (data.length === 0) {
+        labels.push('Brak transakcji');
+        data.push(1); 
+    }
+
+    const isSkup = statsType === 'skup';
+    // Paleta kolorów - Błękitna dla Skupu, Zielona dla Sprzedaży
+    const palette = isSkup 
+        ? ['#38bdf8', '#0284c7', '#0369a1', '#075985', '#0c4a6e', '#1e293b'] 
+        : ['#22c55e', '#16a34a', '#15803d', '#166534', '#14532d', '#1e293b'];
+
+    myChartInstance = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: labels,
+            datasets: [{
+                data: data,
+                backgroundColor: data.length === 1 && labels[0] === 'Brak transakcji' ? ['#334155'] : palette,
+                borderWidth: 3,
+                borderColor: 'rgba(15, 23, 42, 1)'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '65%', // Grubość "pączka"
+            plugins: {
+                legend: {
+                    position: 'right',
+                    labels: { color: '#fff', font: { family: 'Inter', size: 12 }, padding: 15 }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    titleColor: '#fff',
+                    bodyFont: { size: 13, weight: 'bold' },
+                    padding: 12,
+                    borderColor: 'rgba(255,255,255,0.1)',
+                    borderWidth: 1,
+                    callbacks: {
+                        label: function(context) {
+                            if (labels[0] === 'Brak transakcji') return ' Brak danych w tym okresie';
+                            return ` ${context.label}: ${context.raw} szt.`;
+                        }
+                    }
+                },
+                title: {
+                    display: true,
+                    text: isSkup ? 'NAJCZĘŚCIEJ SKUPOWANE (SZTUKI)' : 'NAJCZĘŚCIEJ SPRZEDAWANE (SZTUKI)',
+                    color: '#94a3b8',
+                    font: { size: 11, family: 'Inter', weight: 'bold', letterSpacing: 1 },
+                    padding: { bottom: 15 }
+                }
+            }
+        }
+    });
 }
 
 window.closeMyStats = function() {
     document.getElementById('my-stats-modal').classList.remove('active');
-    document.getElementById('my-stats-loader').innerHTML = `
-        <i class="fas fa-circle-notch fa-spin fa-3x" style="color: var(--accent-color);"></i>
-        <p style="margin-top: 15px; color: var(--text-secondary); font-weight: 600;">Pobieranie danych z bazy...</p>
-    `;
+    document.getElementById('my-stats-loader').innerHTML = `<i class="fas fa-circle-notch fa-spin fa-3x text-accent-icon"></i><p class="loader-text">Pobieranie danych z bazy...</p>`;
 }
 
-// ==========================================
-// MOJE TRANSAKCJE
-// ==========================================
 window.openMyTransactions = async function() {
     document.getElementById('user-dropdown').classList.remove('active');
     document.getElementById('my-transactions-modal').classList.add('active');
-    
     document.getElementById('my-transactions-loader').classList.remove('hidden');
     document.getElementById('my-transactions-content').classList.add('hidden');
     
     try {
-        const response = await fetch(`${REPORTS_API_URL}?action=get_reports&t=${new Date().getTime()}`);
-        const rawData = await response.json();
-        
-        myStatsRawData = rawData.filter(row => row.employee === currentEmployeeName);
-        renderTransactionsList();
-        
+        const [reportsRes, bonusesRes] = await Promise.all([ window.preloadReportsData(), window.preloadBonusesData() ]);
+        myStatsRawData = reportsRes.filter(row => row.employee === currentEmployeeName);
+        myBonusesRawData = (bonusesRes.bonuses || []).filter(b => b.employee === currentEmployeeName);
+        switchTransView('historia');
         document.getElementById('my-transactions-loader').classList.add('hidden');
         document.getElementById('my-transactions-content').classList.remove('hidden');
     } catch (err) {
-        document.getElementById('my-transactions-loader').innerHTML = '<p style="color:var(--danger);"><i class="fas fa-exclamation-triangle"></i> Błąd pobierania danych.</p>';
+        document.getElementById('my-transactions-loader').innerHTML = '<p class="text-danger-icon"><i class="fas fa-exclamation-triangle"></i> Błąd pobierania danych.</p>';
+    }
+}
+
+window.switchTransView = function(view) {
+    const btnHist = document.getElementById('btn-trans-historia'), btnPremie = document.getElementById('btn-trans-premie');
+    const contHist = document.getElementById('transactions-list-container'), contPremie = document.getElementById('bonuses-list-container');
+    const desc = document.getElementById('my-transactions-desc');
+
+    if (view === 'historia') {
+        btnHist.classList.add('active'); btnPremie.classList.remove('active');
+        contHist.classList.remove('hidden'); contPremie.classList.add('hidden');
+        desc.innerText = "Historia Twoich transakcji. Możesz zgłosić pomyłkę w wystawionym paragonie.";
+        renderTransactionsList();
+    } else {
+        btnHist.classList.remove('active'); btnPremie.classList.add('active');
+        contHist.classList.add('hidden'); contPremie.classList.remove('hidden');
+        desc.innerText = "Historia otrzymanych premii finansowych od zarządu.";
+        renderBonusesList();
     }
 }
 
@@ -1756,13 +2922,14 @@ function renderTransactionsList() {
     container.innerHTML = '';
     
     if (!myStatsRawData || myStatsRawData.length === 0) {
-        container.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 20px;">Brak transakcji w historii.</p>';
+        container.innerHTML = '<p class="empty-history-msg">Brak transakcji w historii.</p>';
         return;
     }
 
     const grouped = {};
     myStatsRawData.forEach(row => {
-        if (!row.report_id) return;
+        if (!row.report_id || row.type === 'changelog') return;
+        
         if (!grouped[row.report_id]) {
             let displayDate = row.date;
             const d = parseDate(row.date);
@@ -1779,63 +2946,87 @@ function renderTransactionsList() {
                 date: displayDate,
                 total: 0,
                 items: [],
-                type: row.type
+                type: row.type || 'nieznany'
             };
         }
         grouped[row.report_id].total += row.total;
-        grouped[row.report_id].items.push(`${row.name} (x${row.qty}) - ${row.total}$`);
+        
+        let itemName = row.name || (row.report_id.includes('GOLD') ? 'Przetop złota' : 'Nieznany przedmiot');
+        let itemQty = row.qty || 1;
+        
+        grouped[row.report_id].items.push(`${itemName} (x${itemQty}) - ${row.total}$`);
     });
 
     const sortedIds = Object.keys(grouped).reverse(); 
 
     sortedIds.forEach(id => {
         const data = grouped[id];
-        const typeIcon = data.type === 'skup' ? '<i class="fas fa-cart-arrow-down text-accent"></i>' : '<i class="fas fa-truck-loading text-success"></i>';
+        
+        let typeIcon = '';
+        if (data.type === 'skup') typeIcon = '<i class="fas fa-cart-arrow-down text-accent"></i>';
+        else if (data.type === 'sprzedaz') typeIcon = '<i class="fas fa-truck-loading text-success"></i>';
+        else if (id.includes('GOLD')) typeIcon = '<i class="fa-solid fa-temperature-half text-warning"></i>';
+        else typeIcon = '<i class="fas fa-receipt text-secondary"></i>';
         
         const div = document.createElement('div');
         div.className = 'transaction-item-card';
         div.innerHTML = `
-            <div class="transaction-header">
-                <span style="font-weight: 800; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">${typeIcon} ID: ${id}</span>
-                <span class="transaction-date" style="font-size: 0.8rem; color: var(--text-secondary);">${data.date}</span>
+            <div class="admin-report-header">
+                <span class="transaction-header-type">${typeIcon} ID: ${id}</span>
+                <span class="transaction-date">${data.date}</span>
             </div>
-            <div class="transaction-body" style="margin: 15px 0;">
-                <div class="transaction-items-list" style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 10px;">
+            <div class="transaction-body-layout">
+                <div class="transaction-items-list">
                     ${data.items.map(item => `<div>- ${item}</div>`).join('')}
                 </div>
-                <div class="transaction-total" style="font-weight: 900; color: var(--success); font-size: 1.1rem;">Suma: ${data.total}$</div>
+                <div class="transaction-total-amount">Suma: ${data.total}$</div>
             </div>
-            <div class="transaction-actions" style="border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 15px; text-align: right;">
-                <button class="report-error-btn" onclick="openReportModal('${id}')" style="background: rgba(239, 68, 68, 0.15); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.3); padding: 8px 15px; border-radius: 10px; cursor: pointer; font-weight: 700; transition: 0.2s;">
+            <div class="transaction-actions-layout">
+                <button class="report-error-btn" data-action="report-error" data-id="${id}">
                     <i class="fas fa-exclamation-circle"></i> Zgłoś pomyłkę
                 </button>
             </div>
         `;
-        div.style.background = "rgba(0,0,0,0.3)";
-        div.style.border = "1px solid var(--border-color)";
-        div.style.borderRadius = "14px";
-        div.style.padding = "15px";
-        div.style.marginBottom = "15px";
-        
         container.appendChild(div);
     });
     
     if(sortedIds.length === 0) {
-         container.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 20px;">Brak zidentyfikowanych transakcji z ID.</p>';
+         container.innerHTML = '<p class="empty-history-msg">Brak zidentyfikowanych transakcji z ID.</p>';
     }
+}
+
+function renderBonusesList() {
+    const container = document.getElementById('bonuses-list-container');
+    container.innerHTML = '';
+    
+    if (!myBonusesRawData || myBonusesRawData.length === 0) {
+        container.innerHTML = '<p class="empty-history-msg">Brak przyznanych premii w historii.</p>';
+        return;
+    }
+
+    const sortedBonuses = myBonusesRawData.sort((a,b) => new Date(b.date) - new Date(a.date));
+    sortedBonuses.forEach(b => {
+        let displayDate = b.date;
+        if (typeof displayDate === 'string' && displayDate.includes('T')) displayDate = new Date(displayDate).toLocaleString('pl-PL');
+        let statusBadge = b.status === 'Odebrane' ? `<span class="status-badge-received">Odebrane</span>` : `<span class="status-badge-new">Nowe</span>`;
+        const div = document.createElement('div');
+        div.className = 'transaction-item-card';
+        div.innerHTML = `
+            <div class="admin-report-header"><span class="transaction-header-type gold"><i class="fas fa-gift"></i> Od: ${b.boss}</span><span class="transaction-date">${displayDate}</span></div>
+            <div class="transaction-body-layout">
+                <div class="bonus-item-desc">${b.reason || 'Brak notatki'}</div>
+                <div class="flex-between-center"><div class="transaction-total-amount lg">+${window.formatMoney(b.amount)}$</div>${statusBadge}</div>
+            </div>
+        `;
+        container.appendChild(div);
+    });
 }
 
 window.closeMyTransactions = function() {
     document.getElementById('my-transactions-modal').classList.remove('active');
-    document.getElementById('my-transactions-loader').innerHTML = `
-        <i class="fas fa-circle-notch fa-spin fa-3x" style="color: var(--accent-color);"></i>
-        <p style="margin-top: 15px; color: var(--text-secondary); font-weight: 600;">Pobieranie historii z bazy...</p>
-    `;
+    document.getElementById('my-transactions-loader').innerHTML = `<i class="fas fa-circle-notch fa-spin fa-3x text-accent-icon"></i><p class="loader-text">Pobieranie historii z bazy...</p>`;
 }
 
-// ==========================================
-// ZGŁASZANIE POMYŁEK
-// ==========================================
 window.openReportModal = function(receiptId) {
     currentReportReceiptId = receiptId;
     document.getElementById('report-receipt-id').innerText = receiptId;
@@ -1850,82 +3041,48 @@ window.closeReportModal = function() {
 
 window.submitTransactionReport = async function() {
     const reason = document.getElementById('report-reason-input').value.trim();
-    if (!reason) {
-        return showNotice("Podaj powód zgłoszenia!", "warning");
-    }
+    if (!reason) return showNotice("Podaj powód zgłoszenia!", "warning");
 
     const btn = document.getElementById('submit-report-btn');
     const originalHtml = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Wysyłanie...';
+    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Wysyłanie...';
 
     try {
         const embedPayload = {
             content: "<@303630730528030720>", 
             embeds: [{
-                title: "⚠️ Zgłoszenie pomyłki w transakcji!",
-                color: 15158332, 
+                title: "⚠️ Zgłoszenie pomyłki w transakcji!", color: 15158332, 
                 fields: [
                     { name: "📋 Numer paragonu:", value: `\`${currentReportReceiptId}\``, inline: true },
-                    { 
-                        name: "👤 Zgłaszający:", 
-                        value: `**${currentEmployeeName}**\nSSN: \`${currentEmployeeSsn}\`\nRanga: \`${currentEmployeeRank}\``, 
-                        inline: true 
-                    },
+                    { name: "👤 Zgłaszający:", value: `**${currentEmployeeName}**\nSSN: \`${currentEmployeeSsn}\`\nStopień: \`${currentEmployeeRank}\``, inline: true },
                     { name: "📝 Powód / Opis błędu:", value: reason, inline: false }
                 ],
-                timestamp: new Date().toISOString(),
-                footer: { text: "System EL CARTEL PAWN SHOP" }
+                timestamp: new Date().toISOString(), footer: { text: "System EL CARTEL PAWN SHOP" }
             }]
         };
 
-        const resDiscord = await fetch(DISCORD_WEBHOOK_URL_SKUP, { 
-            method: "POST", 
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(embedPayload) 
-        });
-
-        const resSheet = await fetch(REPORTS_API_URL, {
-            method: 'POST',
-            body: JSON.stringify({
-                action: 'save_error_report',
-                date: getFormattedDateTime(),
-                employee: currentEmployeeName,
-                receipt_id: currentReportReceiptId,
-                reason: reason
-            })
-        });
+        const resDiscord = await fetch(DISCORD_WEBHOOK_URL_SKUP, { method: "POST", headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(embedPayload) });
+        const resSheet = await fetch(REPORTS_API_URL, { method: 'POST', body: JSON.stringify({ action: 'save_error_report', date: getFormattedDateTime(), employee: currentEmployeeName, receipt_id: currentReportReceiptId, reason: reason }) });
 
         if (resDiscord.ok && resSheet.ok) {
-            showNotice("Zgłoszenie pomyłki zapisane i wysłane na Discord!", "success");
+            showNotice("Zgłoszenie wysłane na Discord!", "success");
+            window.addSystemLog('ZGŁOSZENIE POMYŁKI', `Zgłoszono pomyłkę w transakcji. Paragon: ${currentReportReceiptId}, Powód: ${reason}`);
             closeReportModal();
-        } else {
-            throw new Error("Błąd podczas wysyłania.");
-        }
-    } catch (e) {
-        showNotice("Błąd wysyłania zgłoszenia!", "danger");
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = originalHtml;
-    }
+        } else throw new Error("Błąd.");
+    } catch (e) { showNotice("Błąd wysyłania!", "danger"); } 
+    finally { btn.disabled = false; btn.innerHTML = originalHtml; }
 }
 
-// ==========================================
-// ZARZĄDZANIE ZGŁOSZENIAMI (ADMIN)
-// ==========================================
 window.openAdminReports = async function() {
     if (!isTravisVance()) return showNotice("Brak uprawnień!", "danger");
-
     document.getElementById('user-dropdown').classList.remove('active');
     document.getElementById('admin-reports-modal').classList.add('active');
-    
-    document.getElementById('admin-reports-loader').style.display = 'block';
+    document.getElementById('admin-reports-loader').classList.remove('hidden');
     document.getElementById('admin-reports-container').innerHTML = '';
 
     try {
         const response = await fetch(`${REPORTS_API_URL}?action=get_error_reports&t=${new Date().getTime()}`);
         const data = await response.json();
-
         const container = document.getElementById('admin-reports-container');
         container.innerHTML = '';
         
@@ -1933,80 +3090,48 @@ window.openAdminReports = async function() {
         const resolvedReports = data.filter(r => r.status !== 'Oczekujące').reverse().slice(0, 10); 
         
         if (pendingReports.length === 0 && resolvedReports.length === 0) {
-            container.innerHTML = '<p style="text-align: center; color: var(--text-secondary); width: 100%;">Brak zgłoszeń w systemie.</p>';
+            container.innerHTML = '<p class="empty-history-msg">Brak zgłoszeń.</p>';
         } else {
             let html = '';
-            
             if (pendingReports.length > 0) {
-                html += '<h3 style="color: var(--danger); margin-bottom: 10px; width: 100%; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 5px;">Wymagają uwagi</h3>';
+                html += '<h3 class="admin-report-title-warning">Wymagają uwagi</h3>';
                 pendingReports.forEach(r => html += buildAdminReportCard(r));
             }
-            
             if (resolvedReports.length > 0) {
-                html += '<h3 style="color: var(--success); margin-top: 20px; margin-bottom: 10px; width: 100%; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 5px;">Ostatnio rozwiązane</h3>';
+                html += '<h3 class="admin-report-title-success">Ostatnio rozwiązane</h3>';
                 resolvedReports.forEach(r => html += buildAdminReportCard(r));
             }
-            
             container.innerHTML = html;
         }
-    } catch (e) {
-        document.getElementById('admin-reports-container').innerHTML = '<p style="color: var(--danger); text-align: center;">Błąd pobierania danych.</p>';
-    } finally {
-        document.getElementById('admin-reports-loader').style.display = 'none';
-    }
+    } catch (e) { document.getElementById('admin-reports-container').innerHTML = '<p class="text-danger-icon" style="text-align:center;">Błąd.</p>'; } 
+    finally { document.getElementById('admin-reports-loader').classList.add('hidden'); }
 }
 
 function buildAdminReportCard(r) {
     let statusColor = r.status === 'Oczekujące' ? 'var(--warning)' : (r.status === 'Zaakceptowane' ? 'var(--success)' : 'var(--danger)');
+    let actionsHtml = r.status === 'Oczekujące' ? `<div class="admin-report-actions"><button class="btn-reject" data-action="admin-status" data-id="${r.receipt_id}" data-status="Odrzucone">Odrzuć</button><button class="btn-accept" data-action="admin-status" data-id="${r.receipt_id}" data-status="Zaakceptowane">Zaakceptuj pomyłkę</button></div>` : '';
     
-    let actionsHtml = r.status === 'Oczekujące' ? `
-        <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: flex-end;">
-            <button onclick="updateReportStatus('${r.receipt_id}', 'Odrzucone')" style="background: rgba(239, 68, 68, 0.15); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.3); padding: 8px 15px; border-radius: 8px; cursor: pointer; font-weight: 600; transition: 0.2s;">Odrzuć</button>
-            <button onclick="updateReportStatus('${r.receipt_id}', 'Zaakceptowane')" style="background: rgba(34, 197, 94, 0.15); color: var(--success); border: 1px solid rgba(34, 197, 94, 0.3); padding: 8px 15px; border-radius: 8px; cursor: pointer; font-weight: 600; transition: 0.2s;">Zaakceptuj pomyłkę</button>
-        </div>
-    ` : '';
+    let displayDate = r.date;
+    if (typeof displayDate === 'string' && displayDate.includes('T')) {
+        displayDate = new Date(displayDate).toLocaleString('pl-PL');
+    }
 
-    return `
-        <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 12px; padding: 15px; width: 100%;">
-            <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-                <span style="font-weight: 800; color: var(--text-primary);"><i class="fas fa-hashtag"></i> ID: ${r.receipt_id}</span>
-                <span style="font-size: 0.8rem; color: var(--text-secondary);">${r.date}</span>
-            </div>
-            <div style="margin-bottom: 5px; font-size: 0.9rem;"><span style="color: var(--text-secondary);">Zgłasza:</span> <strong style="color: var(--text-primary);">${r.employee}</strong></div>
-            <div style="margin-bottom: 15px; font-size: 0.9rem; line-height: 1.4;"><span style="color: var(--text-secondary);">Powód:</span> <span style="color: #fff;">${r.reason}</span></div>
-            <div style="font-size: 0.9rem;"><span style="color: var(--text-secondary);">Status:</span> <strong style="color: ${statusColor};">${r.status}</strong></div>
-            ${actionsHtml}
-        </div>
-    `;
+    return `<div class="admin-report-card"><div class="admin-report-header"><span class="admin-report-id"><i class="fas fa-hashtag"></i> ID: ${r.receipt_id}</span><span class="admin-report-date transaction-date">${displayDate}</span></div><div class="admin-report-emp"><span class="text-secondary">Zgłasza:</span> <strong class="text-primary">${r.employee}</strong></div><div class="admin-report-reason"><span class="text-secondary">Powód:</span> <span class="text-white-inline">${r.reason}</span></div><div class="admin-report-status"><span class="text-secondary">Status:</span> <strong style="color: ${statusColor};">${r.status}</strong></div>${actionsHtml}</div>`;
 }
 
-window.closeAdminReports = function() {
-    document.getElementById('admin-reports-modal').classList.remove('active');
-}
+window.closeAdminReports = function() { document.getElementById('admin-reports-modal').classList.remove('active'); }
 
 window.updateReportStatus = async function(receiptId, newStatus) {
     if (!isTravisVance()) return;
-    
     try {
         showNotice("Aktualizowanie...", "info");
-        await fetch(REPORTS_API_URL, {
-            method: 'POST',
-            body: JSON.stringify({
-                action: 'update_error_report',
-                receipt_id: receiptId,
-                new_status: newStatus
-            })
-        });
-        showNotice(`Zgłoszenie pomyłki zaktualizowane: ${newStatus}`, "success");
+        await fetch(REPORTS_API_URL, { method: 'POST', body: JSON.stringify({ action: 'update_error_report', receipt_id: receiptId, new_status: newStatus }) });
+        showNotice(`Zgłoszenie zaktualizowane: ${newStatus}`, "success");
+        window.addSystemLog('STATUS ZGŁOSZENIA', `Zmieniono status zgłoszenia [${receiptId}] na: ${newStatus}`);
         openAdminReports(); 
-    } catch(e) {
-        showNotice("Wystąpił błąd podczas aktualizacji!", "danger");
-    }
+    } catch(e) { showNotice("Wystąpił błąd podczas aktualizacji!", "danger"); }
 }
 
-// ==========================================
-// IDENTYFIKATOR KARTY PROFILU + GAMIFIKACJA
-// ==========================================
 window.openIdCard = async function() {
     document.getElementById('user-dropdown').classList.remove('active');
     
@@ -2014,151 +3139,563 @@ window.openIdCard = async function() {
         document.getElementById('id-card-name').innerText = currentEmployeeName.toUpperCase();
         document.getElementById('id-card-ssn').innerText = currentEmployeeSsn;
         document.getElementById('id-card-date-zatrudnienia').innerText = currentEmployeeDateZatrudnienia;
-        
-        const photoContainer = document.querySelector('#id-card-modal .id-photo-box');
-        if (currentEmployeePhoto && currentEmployeePhoto !== "") {
-            photoContainer.innerHTML = `<img src="${currentEmployeePhoto}" alt="Zdjęcie postaci" class="id-photo-img">`;
-        } else {
-            photoContainer.innerHTML = `<i class="fas fa-user-tie"></i>`;
-        }
-
-        const signatureEl = document.getElementById('id-card-signature');
-        if (signatureEl) signatureEl.innerText = currentEmployeeName;
-
+        const photoContainer = document.getElementById('id-card-photo-container');
+        if (currentEmployeePhoto && currentEmployeePhoto !== "") photoContainer.innerHTML = `<img src="${currentEmployeePhoto}" alt="Zdjęcie postaci" class="id-photo-img">`;
+        else photoContainer.innerHTML = `<i class="fas fa-user-tie"></i>`;
+        document.getElementById('id-card-signature').innerText = currentEmployeeName;
         document.getElementById('id-card-rank-container').innerHTML = `<span class="active-rank">${currentEmployeeRank}</span>`;
-        
-        // Reset Gamifikacji przed wczytaniem
         document.getElementById('id-card-level-text').innerText = "Analiza danych...";
         document.getElementById('id-card-xp-text').innerText = "Wczytywanie XP...";
         document.getElementById('id-progress-bar-fill').style.width = "0%";
-        document.getElementById('id-badges-container').innerHTML = '<i class="fas fa-spinner fa-spin text-secondary"></i> Pobieranie osiągnięć...';
     }
     
     document.getElementById('id-card-modal').classList.add('active');
 
-    // Pobieranie danych do Leveli i Osiągnięć
     try {
         const response = await fetch(`${REPORTS_API_URL}?action=get_reports&t=${new Date().getTime()}`);
         const rawData = await response.json();
-        
         const myData = rawData.filter(row => row.employee === currentEmployeeName);
+        let totalXP = 0; let txSet = new Set();
+        myData.forEach(row => { totalXP += row.total; if(row.report_id) txSet.add(row.report_id); });
         
-        let totalXP = 0;
-        let txSet = new Set();
-        
-        myData.forEach(row => {
-            totalXP += row.total;
-            if(row.report_id) txSet.add(row.report_id);
-        });
-        
-        let txCount = txSet.size || (myData.length > 0 ? 1 : 0);
-        
-        renderGamification(totalXP, txCount);
-        
+        renderGamification(totalXP);
     } catch (e) {
-        console.error(e);
         document.getElementById('id-card-level-text').innerText = "Błąd pobierania danych";
         document.getElementById('id-card-xp-text').innerText = "Brak połączenia";
-        document.getElementById('id-badges-container').innerHTML = '';
     }
 }
 
-function renderGamification(totalXP, txCount) {
+function renderGamification(totalXP) {
     const levels = [
         { lvl: 1, max: 50000, name: "Rekrut" },
-        { lvl: 2, max: 250000, name: "Znawca" },
-        { lvl: 3, max: 500000, name: "Specjalista" },
-        { lvl: 4, max: 700000, name: "Ekspert" },
-        { lvl: 5, max: 1500000, name: "Weteran" },
-        { lvl: 6, max: 5000000, name: "Legenda lombardu" }
+        { lvl: 2, max: 150000, name: "Praktykant" },
+        { lvl: 3, max: 350000, name: "Znawca" },
+        { lvl: 4, max: 500000, name: "Sprzedawca" },
+        { lvl: 5, max: 700000, name: "Specjalista" },
+        { lvl: 6, max: 1000000, name: "Ekspert" },
+        { lvl: 7, max: 1500000, name: "Starszy ekspert" },
+        { lvl: 8, max: 2000000, name: "Weteran" },
+        { lvl: 9, max: 3000000, name: "Mistrz handlu" },
+        { lvl: 10, max: 4000000, name: "Rekin biznesu" },
+        { lvl: 11, max: 5000000, name: "Szara eminencja" },
+        { lvl: 12, max: 7500000, name: "Kierownik rewiru" },
+        { lvl: 13, max: 10000000, name: "Boss podziemia" },
+        { lvl: 14, max: 15000000, name: "Ojciec Chrzestny" },
+        { lvl: 15, max: 20000000, name: "Legenda El Cartel" }
     ];
     
-    let currentLvl = 1;
-    let currentMax = 50000;
-    let prevMax = 0;
+    const maxLevel = levels.length;
+    let currentLvl = 1, currentMax = levels[0].max, prevMax = 0;
     
     for (let i = 0; i < levels.length; i++) {
-        if (totalXP < levels[i].max) {
+        if (totalXP < levels[i].max) { 
+            currentLvl = levels[i].lvl; 
+            currentMax = levels[i].max; 
+            prevMax = i > 0 ? levels[i-1].max : 0; 
+            break; 
+        }
+        if (i === levels.length - 1 && totalXP >= levels[i].max) {
             currentLvl = levels[i].lvl;
             currentMax = levels[i].max;
             prevMax = i > 0 ? levels[i-1].max : 0;
-            break;
         }
     }
     
-    let xpInCurrentLevel = totalXP - prevMax;
-    let xpNeededForNextLevel = currentMax - prevMax;
-    let progressPercent = (xpInCurrentLevel / xpNeededForNextLevel) * 100;
-    if (progressPercent > 100) progressPercent = 100;
-    if (currentLvl === 6) progressPercent = 100; 
+    let progressPercent = ((totalXP - prevMax) / (currentMax - prevMax)) * 100;
+    if (progressPercent > 100 || currentLvl === maxLevel) progressPercent = 100; 
+    if (progressPercent < 0) progressPercent = 0;
     
     document.getElementById('id-card-level-text').innerText = `Poziom ${currentLvl} - ${levels[currentLvl-1].name}`;
+    document.getElementById('id-card-xp-text').innerText = currentLvl === maxLevel ? `MAX LEVEL (${totalXP.toLocaleString()}$)` : `${totalXP.toLocaleString()}$ / ${currentMax.toLocaleString()}$`;
+    setTimeout(() => { document.getElementById('id-progress-bar-fill').style.width = `${progressPercent}%`; }, 100);
+}
+
+window.closeIdCard = function() { document.getElementById('id-card-modal').classList.remove('active'); }
+
+window.openAchievements = async function() {
+    document.getElementById('user-dropdown').classList.remove('active');
+    document.getElementById('achievements-modal').classList.add('active');
+    document.getElementById('achievements-loader').classList.remove('hidden');
+    document.getElementById('achievements-container').classList.add('hidden');
     
-    if (currentLvl === 6) {
-        document.getElementById('id-card-xp-text').innerText = `MAX LEVEL (${totalXP.toLocaleString()}$)`;
-    } else {
-        document.getElementById('id-card-xp-text').innerText = `${totalXP.toLocaleString()}$ / ${currentMax.toLocaleString()}$`;
+    try {
+        const [rawData, errorReportsData] = await Promise.all([
+            window.preloadReportsData(),
+            window.preloadErrorReportsData()
+        ]);
+        
+        const myData = rawData.filter(row => row.employee === currentEmployeeName);
+        const myErrors = (Array.isArray(errorReportsData) ? errorReportsData : []).filter(row => row.employee === currentEmployeeName).length;
+        
+        let totalXP = 0; let txSet = new Set();
+        myData.forEach(row => { totalXP += row.total; if(row.report_id) txSet.add(row.report_id); });
+        let txCount = txSet.size || (myData.length > 0 ? 1 : 0);
+        
+        renderBadges(totalXP, txCount, myData, rawData, myErrors);
+        
+        document.getElementById('achievements-loader').classList.add('hidden');
+        document.getElementById('achievements-container').classList.remove('hidden');
+    } catch (e) {
+        document.getElementById('achievements-loader').innerHTML = '<p class="text-danger-icon" style="text-align:center;"><i class="fas fa-exclamation-triangle"></i> Błąd pobierania danych.</p>';
     }
+}
+
+window.closeAchievements = function() { 
+    document.getElementById('achievements-modal').classList.remove('active'); 
+    document.getElementById('achievements-loader').innerHTML = `<i class="fas fa-circle-notch fa-spin fa-3x text-accent-icon"></i><p class="loader-text">Pobieranie danych...</p>`;
+}
+
+function renderBadges(totalXP, txCount, myData = [], rawData = [], myErrors = 0) {
+    let maxSingleTx = 0;
+    let maxSingleBuyTx = 0; 
+    let nightShiftCount = 0;
+    let weirdStuffCount = 0;
+    let goldCount = 0;
+    let maxItemsInSingleTx = 0; 
+    let electronicsCount = 0; 
+    let artCount = 0; 
+    let totalSellVolume = 0; 
+    let katanaCount = 0;
+	let pirateItemsCount = 0;
+    let seaItemsCount = 0;
+    let punctualCount = 0; 
+    let uniqueClients = new Set();
     
-    setTimeout(() => {
-        document.getElementById('id-progress-bar-fill').style.width = `${progressPercent}%`;
-    }, 100);
+    let clientCounts = {};
+    let maxRepeatedClient = 0;
     
-    // Lista osiągnięć do odblokowania
+    let servedWhileBossOnline = false;
+    const bosses = window.currentEmployeesList.filter(e => e.role && e.role.toLowerCase() === 'szef').map(e => e.name);
+    let bossTimestamps = [];
+    
+    let metJamajka = false;
+    let jamajkaTimestamps = [];
+    const jamajkaStartDate = parseDate("06.06.2026 00:00").getTime(); 
+    
+    if (rawData && rawData.length > 0) {
+        rawData.forEach(row => {
+            if (bosses.includes(row.employee) && row.date) {
+                bossTimestamps.push(parseDate(row.date).getTime());
+            }
+            
+            if (row.employee && (row.employee.toLowerCase().includes('jamajka') || row.employee.toLowerCase().includes('james brown')) && row.date) {
+                const d = parseDate(row.date);
+                if (d && !isNaN(d.getTime())) {
+                    const time = d.getTime();
+                    if (time >= jamajkaStartDate) {
+                        jamajkaTimestamps.push(time);
+                    }
+                }
+            }
+        });
+    }
+
+    let txTimestamps = [];
+    let uniqueDays = new Set();
+
+    myData.forEach(tx => {
+        if (tx.total > maxSingleTx) maxSingleTx = tx.total;
+        if (tx.type === 'skup' && tx.total > maxSingleBuyTx) maxSingleBuyTx = tx.total;
+        if (tx.type === 'sprzedaz') totalSellVolume += tx.total;
+        if (tx.type === 'skup' && tx.qty > maxItemsInSingleTx) maxItemsInSingleTx = tx.qty;
+
+        if (tx.ssn && String(tx.ssn).trim() !== "") {
+            const ssnKey = String(tx.ssn).trim();
+            uniqueClients.add(ssnKey);
+            
+            clientCounts[ssnKey] = (clientCounts[ssnKey] || 0) + 1;
+            if (clientCounts[ssnKey] > maxRepeatedClient) {
+                maxRepeatedClient = clientCounts[ssnKey];
+            }
+        }
+
+        let txTime = 0;
+        if (tx.date) {
+            const txDate = parseDate(tx.date);
+            if (txDate && !isNaN(txDate.getTime())) {
+                txTime = txDate.getTime();
+                
+                // ZABEZPIECZENIE: Zliczamy do osiągnięć czasowych i passy TYLKO faktyczne transakcje!
+                if (tx.type === 'skup' || tx.type === 'sprzedaz' || tx.type === 'zloto') {
+                    txTimestamps.push(txTime);
+                    const dayString = `${txDate.getFullYear()}-${String(txDate.getMonth() + 1).padStart(2, '0')}-${String(txDate.getDate()).padStart(2, '0')}`;
+                    uniqueDays.add(dayString);
+                }
+                
+                const hour = txDate.getHours();
+                if (hour >= 0 && hour <= 5) nightShiftCount++;
+                
+                if (txDate.getMinutes() === 0) punctualCount++;
+            }
+        }
+        
+        if (!servedWhileBossOnline && txTime > 0) {
+            if (bossTimestamps.some(bTime => Math.abs(bTime - txTime) <= 120 * 60 * 1000)) {
+                servedWhileBossOnline = true;
+            }
+        }
+
+        const myNameLow = currentEmployeeName.toLowerCase();
+        if (!metJamajka && txTime >= jamajkaStartDate && !myNameLow.includes('jamajka') && !myNameLow.includes('james brown')) {
+            if (jamajkaTimestamps.some(jTime => Math.abs(jTime - txTime) <= 120 * 60 * 1000)) {
+                metJamajka = true;
+            }
+        }
+
+			if (tx.name) {
+            const nameLow = tx.name.toLowerCase();
+            if (nameLow.includes('dziwna substancja')) weirdStuffCount += (tx.qty || 1);
+            if (nameLow.includes('złot') || nameLow.includes('sztabka')) goldCount += (tx.qty || 1);
+            if (nameLow.includes('telefon') || nameLow.includes('telewizor') || nameLow.includes('konsola') || nameLow.includes('komputer') || nameLow.includes('monitor') || nameLow.includes('mikrofala')) {
+                electronicsCount += (tx.qty || 1);
+            }
+            if (nameLow.includes('obraz') || nameLow.includes('książka') || nameLow.includes('dywan')) {
+                artCount += (tx.qty || 1);
+            }
+            if (nameLow.includes('katana')) katanaCount += (tx.qty || 1);
+            
+            // NOWE: Pirackie i Antyczne przedmioty (TYLKO SKUP)
+            if (tx.type === 'skup' && (nameLow.includes('pirack') || nameLow.includes('flaga') || nameLow.includes('szkatuła') || nameLow.includes('szabla') || nameLow.includes('fajka'))) {
+                pirateItemsCount += (tx.qty || 1);
+            }
+            
+			// NOWE: Morskie zdobycze (TYLKO SKUP)
+            if (tx.type === 'skup' && (nameLow.includes('muszl') || nameLow.includes('gwiazda morsk') || nameLow.includes('ząb rekina') || nameLow.includes('perła'))) {
+                seaItemsCount += (tx.qty || 1);
+            }
+        }
+    });
+
+    // --- WYLICZANIE PRACOHOLIKA (PANCERNY SYSTEM) ---
+    const sortedDays = Array.from(uniqueDays).sort((a, b) => new Date(b) - new Date(a));
+    
+    let currentStreak = 0;
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    
+    const yesterday = new Date();
+    yesterday.setDate(today.getDate() - 1);
+    const yesterdayStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+
+    if (sortedDays.length > 0) {
+        // Passa trwa TYLKO, jeśli ostatnia transakcja była dzisiaj lub wczoraj
+        if (sortedDays[0] === todayStr || sortedDays[0] === yesterdayStr) {
+            currentStreak = 1; // Mamy przynajmniej 1 dzień
+            
+            // Lecimy po kolei wstecz i sprawdzamy, czy dni są idealnie dzień po dniu
+            for (let i = 0; i < sortedDays.length - 1; i++) {
+                const currDate = new Date(sortedDays[i]);
+                const nextDate = new Date(sortedDays[i+1]);
+                
+                // Obliczamy różnicę w dniach
+                const diffTime = currDate - nextDate;
+                const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+                
+                if (diffDays === 1) {
+                    currentStreak++; // Dzień po dniu -> dodajemy do passy
+                } else {
+                    break; // Przerwa -> passa zerwana, przerywamy pętlę
+                }
+            }
+        } else {
+            currentStreak = 0;
+        }
+    } else {
+        currentStreak = 0;
+    }
+    // ------------------------------------------------
+
+    let fastHustleAchieved = 0;
+    txTimestamps.sort((a, b) => a - b);
+    for (let i = 0; i <= txTimestamps.length - 5; i++) {
+        if (txTimestamps[i + 4] - txTimestamps[i] <= 10 * 60 * 1000) {
+            fastHustleAchieved = 1;
+            break;
+        }
+    }
+
+    const tierColors = ["#cd7f32", "#c0c0c0", "#fbbf24"]; 
+
     const badges = [
-        { icon: "fa-tint", name: "Pierwsza krew", desc: "Zrealizowano pierwszą transakcję w systemie.", color: "#ef4444", condition: txCount >= 1 },
-        { icon: "fa-handshake", name: "Solidna firma", desc: "Zrealizowano 150 transakcji.", color: "#a855f7", condition: txCount >= 150 },
-        { icon: "fa-fish", name: "Rekin biznesu", desc: "Wygenerowano 300,000$ obrotu całkowitego.", color: "#38bdf8", condition: totalXP >= 300000 },
-        { icon: "fa-medal", name: "Stary wyga", desc: "Zrealizowano 200 transakcji.", color: "#fbbf24", condition: txCount >= 200 },
-        { icon: "fa-crown", name: "Milioner", desc: "Przekroczono barierę 5,000,000$ obrotu. Jesteś elitą.", color: "#eab308", condition: totalXP >= 5000000 }
+		{ icon: "fa-tint", name: "Pierwsza krew", desc: "Zrealizuj swoją pierwszą transakcję w systemie.", current: txCount > 0 ? 1 : 0, 
+          tiers: [{ max: 1, color: "#ef4444" }] },
+		  
+        { icon: "fa-handshake", name: "Solidna firma", desc: "Zrealizuj udane transakcje z klientami.", current: txCount, 
+          tiers: [{ max: 50, color: tierColors[0] }, { max: 150, color: tierColors[1] }, { max: 450, color: tierColors[2] }] },
+          
+        { icon: "fa-fish", name: "Rekin biznesu", desc: "Wygeneruj obrót w firmie.", current: totalXP, isMoney: true, 
+          tiers: [{ max: 100000, color: tierColors[0] }, { max: 500000, color: tierColors[1] }, { max: 2000000, color: tierColors[2] }] },
+          
+        { icon: "fa-flask", name: "Chemiczny Ali", desc: "Przetwórz dziwne substancje.", current: weirdStuffCount, 
+          tiers: [{ max: 25, color: tierColors[0] }, { max: 50, color: tierColors[1] }, { max: 100, color: tierColors[2] }] },
+          
+        { icon: "fa-coins", name: "Gorączka złota", desc: "Skup lub sprzedaj złote przedmioty.", current: goldCount, 
+          tiers: [{ max: 50, color: tierColors[0] }, { max: 100, color: tierColors[1] }, { max: 200, color: tierColors[2] }] },
+          
+        { icon: "fa-moon", name: "Nocny Marek", desc: "Wykonaj transakcje na nocnej zmianie (0:00 - 6:00).", current: nightShiftCount, 
+          tiers: [{ max: 10, color: tierColors[0] }, { max: 25, color: tierColors[1] }, { max: 50, color: tierColors[2] }] },
+          
+        { icon: "fa-boxes", name: "Hurtownik", desc: "Skup określoną ilość przedmiotów na jednym paragonie.", current: maxItemsInSingleTx, 
+          tiers: [{ max: 10, color: tierColors[0] }, { max: 20, color: tierColors[1] }, { max: 30, color: tierColors[2] }] },
+          
+        { icon: "fa-laptop", name: "Elektro-śmieciarz", desc: "Obracaj sprzętem elektronicznym.", current: electronicsCount, 
+          tiers: [{ max: 50, color: tierColors[0] }, { max: 150, color: tierColors[1] }, { max: 250, color: tierColors[2] }] },
+          
+        { icon: "fa-truck-loading", name: "Wilk z Wall Street", desc: "Sprzedaj towar z magazynu.", current: totalSellVolume, isMoney: true, 
+          tiers: [{ max: 100000, color: tierColors[0] }, { max: 400000, color: tierColors[1] }, { max: 850000, color: tierColors[2] }] },
+          
+        { icon: "fa-users", name: "Znajoma twarz", desc: "Obsłuż unikalnych klientów (różne numery SSN).", current: uniqueClients.size, 
+          tiers: [{ max: 20, color: tierColors[0] }, { max: 40, color: tierColors[1] }, { max: 70, color: tierColors[2] }] },
+          
+        { icon: "fa-id-badge", name: "Stały bywalec", desc: "Zbuduj zaufanie na dzielnicy. Obsłuż tego samego klienta (ten sam numer SSN) wielokrotnie.", current: maxRepeatedClient, 
+          tiers: [{ max: 10, color: tierColors[0] }, { max: 20, color: tierColors[1] }, { max: 30, color: tierColors[2] }] },
+          
+        { icon: "fa-fire", name: "Pracoholik", desc: "Zrealizuj przynajmniej jedną transakcję dziennie pod rząd.", current: currentStreak, 
+          tiers: [{ max: 7, color: tierColors[0] }, { max: 14, color: tierColors[1] }, { max: 30, color: tierColors[2] }] },
+
+        { icon: "fa-hourglass-start", name: "Punktualny", desc: "W firmie zjawiasz się co do minuty. Zrealizuj transakcję dokładnie o pełnej godzinie (np. 14:00, 18:00).", current: punctualCount, 
+          tiers: [{ max: 1, color: tierColors[0] }, { max: 5, color: tierColors[1] }, { max: 10, color: tierColors[2] }] },
+
+        { icon: "fa-bolt", name: "Szybka fucha", desc: "Zrealizuj 5 transakcji w czasie poniżej 10 minut.", current: fastHustleAchieved, 
+          tiers: [{ max: 1, color: "#f97316" }] },
+          
+        { icon: "fa-briefcase", name: "Prawa ręka", desc: "Zrealizuj transakcję na tej samej zmianie z szefem.", current: servedWhileBossOnline ? 1 : 0, 
+          tiers: [{ max: 1, color: "#eab308" }] },
+          
+        { icon: "fa-feather", name: "Czyste sumienie", desc: "Zrealizuj minimum 50 transakcji nie mając żadnej pomyłki.", current: (txCount >= 50 && myErrors === 0) ? 1 : 0, 
+          tiers: [{ max: 1, color: "#14b8a6" }] },
+          
+        { icon: "fa-ghost", name: "Duch Jamajki", desc: "Udało ci się spotkać legendę. Zrealizowałeś transakcję na tej samej zmianie co Jamajka.", current: metJamajka ? 1 : 0, 
+          tiers: [{ max: 1, color: "#22c55e" }] },
+		  
+		{ icon: "fa-skull-crossbones", name: "Klątwa Czarnobrodego", desc: "Skupuj antyki i pirackie artefakty (płaszcze, kapelusze, flagi piratów, szkatuły, szable i fajki).", current: pirateItemsCount, 
+          tiers: [{ max: 25, color: tierColors[0] }, { max: 40, color: tierColors[1] }, { max: 70, color: tierColors[2] }] },
+
+        { icon: "fa-water", name: "Zew oceanu", desc: "Skup dary morza (muszle, perły, zęby rekinów).", current: seaItemsCount, 
+          tiers: [{ max: 20, color: tierColors[0] }, { max: 50, color: tierColors[1] }, { max: 100, color: tierColors[2] }] }
     ];
     
-    const container = document.getElementById('id-badges-container');
-    container.innerHTML = '';
-    
     badges.forEach(b => {
-        const isUnlocked = b.condition;
+        b.completedTiers = 0;
+        for (let i = 0; i < b.tiers.length; i++) {
+            if (b.current >= b.tiers[i].max) b.completedTiers++;
+        }
+        b.isMaxed = (b.completedTiers === b.tiers.length);
+    });
+
+    badges.sort((a, b) => {
+        if (a.isMaxed && !b.isMaxed) return 1;
+        if (!a.isMaxed && b.isMaxed) return -1;
+        return 0;
+    });
+
+    const container = document.getElementById('achievements-container');
+    container.innerHTML = '';
+    container.className = 'achievements-grid hidden'; 
+    container.style = ''; 
+
+    badges.forEach(b => {
+        const completedTiers = b.completedTiers;
+        const isMaxed = b.isMaxed;
+        const currentTierInfo = isMaxed ? b.tiers[b.tiers.length - 1] : b.tiers[completedTiers];
+        const activeColor = completedTiers > 0 ? b.tiers[completedTiers - 1].color : "var(--text-secondary)";
+        const hasStarted = b.current > 0;
+        
+        const displayCurrent = Math.min(b.current, currentTierInfo.max);
+        const percentage = (displayCurrent / currentTierInfo.max) * 100;
+        
+        const currentText = b.isMoney ? window.formatMoney(displayCurrent) + '$' : displayCurrent;
+        const maxText = b.isMoney ? window.formatMoney(currentTierInfo.max) + '$' : currentTierInfo.max;
+
+        let dotsHtml = '';
+        if (b.tiers.length > 1) {
+            dotsHtml = '<div style="display:flex; gap:3px; margin-top:5px;">';
+            for (let i = 0; i < b.tiers.length; i++) {
+                dotsHtml += `<i class="fas fa-star" style="font-size: 0.6rem; color: ${i < completedTiers ? b.tiers[i].color : 'rgba(255,255,255,0.1)'}"></i>`;
+            }
+            dotsHtml += '</div>';
+        }
+
         const badgeEl = document.createElement('div');
-        badgeEl.title = b.desc;
-        badgeEl.style.cssText = `
-            background: rgba(255,255,255,0.05); 
-            border: 1px solid rgba(255,255,255,0.1); 
-            padding: 8px 12px; 
-            border-radius: 8px; 
-            display: flex; 
-            align-items: center; 
-            gap: 8px; 
-            font-size: 0.8rem; 
-            font-weight: 600; 
-            cursor: help;
-            transition: 0.2s;
-            opacity: ${isUnlocked ? '1' : '0.4'};
-            filter: ${isUnlocked ? 'none' : 'grayscale(100%)'};
+        badgeEl.className = `achievement-card ${hasStarted ? 'unlocked' : 'locked'}`;
+        
+        badgeEl.innerHTML = `
+            <div class="achievement-header">
+                <div class="achievement-icon" style="color: ${activeColor}; border-color: ${activeColor !== 'var(--text-secondary)' ? activeColor : 'transparent'}; box-shadow: ${activeColor !== 'var(--text-secondary)' ? '0 0 15px ' + activeColor + '40' : 'none'};">
+                    <i class="fas ${b.icon}"></i>
+                </div>
+                <div class="achievement-info">
+                    <div class="achievement-title" style="color: ${hasStarted ? '#fff' : 'var(--text-secondary)'}">${b.name}</div>
+                    <div class="achievement-desc">${b.desc}</div>
+                    ${dotsHtml}
+                </div>
+            </div>
+            <div class="achievement-progress-wrapper">
+                <div class="achievement-progress-text">
+                    ${isMaxed ? `<span style="color: ${activeColor}"><i class="fas fa-check-circle"></i> Ukończono na maxa</span>` : `<span>${currentText} / ${maxText}</span>`}
+                </div>
+                <div class="achievement-progress-container">
+                    <div class="achievement-progress-fill" style="width: ${isMaxed ? 100 : percentage}%; background: ${isMaxed ? activeColor : 'var(--accent-color)'};"></div>
+                </div>
+            </div>
         `;
-        
-        badgeEl.onmouseover = () => badgeEl.style.transform = 'translateY(-2px)';
-        badgeEl.onmouseout = () => badgeEl.style.transform = 'translateY(0)';
-        
-        badgeEl.innerHTML = `<i class="fas ${b.icon}" style="color: ${b.color}; font-size: 1.1rem;"></i> <span style="color: #fff;">${b.name}</span>`;
         container.appendChild(badgeEl);
     });
 }
 
-window.closeIdCard = function() {
-    document.getElementById('id-card-modal').classList.remove('active');
-}
-
-// ==========================================
-// FUNKCJE WSPÓLNE I AUTO UPDATE
-// ==========================================
-window.showNotice = function(msg, type) {
+// ZAKTUALIZOWANA FUNKCJA SHOWNOTICE - NOWY NIEZAWODNY POMIAR CZASU DLA KONTROLEK TIMERA ORAZ OBSŁUGA DŹWIĘKÓW
+window.showNotice = function(msg, type = 'info', duration = 3000, soundName = null) {
     const container = document.getElementById('toast-container');
     if(!container) return;
     const t = document.createElement('div');
     t.className = `toast ${type}`;
     t.innerText = msg;
+    
+    // Tworzymy fizyczny element paska postępu sterowany przez JS
+    const progress = document.createElement('div');
+    progress.className = 'toast-progress';
+    progress.style.animationDuration = `${duration}ms`;
+    t.appendChild(progress);
+    
     container.appendChild(t);
-    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 500); }, 3000);
+    
+    // Odtwarzanie dźwięku systemowego dopasowanego do typu powiadomienia lub wymuszonego parametrem
+    if (soundName) {
+        window.playSystemSound(soundName);
+    } else {
+        if (type === 'success') window.playSystemSound('success');
+        else if (type === 'danger') window.playSystemSound('error');
+        else if (type === 'warning') window.playSystemSound('warning');
+        else window.playSystemSound('info');
+    }
+    
+    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, duration);
+}
+
+window.checkLoyaltyCustomer = async function() {
+    const ssnInput = document.getElementById('loyalty-search-ssn').value.trim();
+    if(!ssnInput) return showNotice("Podaj numer SSN!", "warning");
+    
+    if (window.currentEmployeesList && window.currentEmployeesList.length > 0) {
+        const isEmployee = window.currentEmployeesList.some(emp => String(emp.ssn) === ssnInput);
+        if (isEmployee) {
+            currentLoyaltyCustomer = null;
+            document.getElementById('loyalty-customer-info').classList.add('hidden');
+            return showNotice("Pracownicy firmy nie mogą korzystać z programu lojalnościowego!", "danger");
+        }
+    }
+
+    const btn = document.getElementById('check-loyalty-btn');
+    const origText = btn.innerText;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+    try {
+        const [loyaltyRes, settingsRes] = await Promise.all([
+            fetch(`${REPORTS_API_URL}?action=get_loyalty&t=${new Date().getTime()}`),
+            fetch(`${REPORTS_API_URL}?action=get_loyalty_settings&t=${new Date().getTime()}`)
+        ]);
+        
+        const data = await loyaltyRes.json();
+        const settingsData = await settingsRes.json();
+        
+        const loyaltyList = data.loyalty || [];
+        const rewardsList = settingsData.rewards || [];
+        
+        const customer = loyaltyList.find(c => String(c.ssn) === ssnInput);
+        
+        if(customer) {
+            currentLoyaltyCustomer = { ssn: ssnInput, stamps: Number(customer.stamps) };
+            document.getElementById('loyalty-display-ssn').innerText = ssnInput;
+            document.getElementById('loyalty-display-stamps').innerText = currentLoyaltyCustomer.stamps;
+            
+            const rewardsGrid = document.querySelector('.loyalty-grid');
+            if(rewardsGrid) {
+                if(rewardsList.length > 0) {
+                    rewardsGrid.innerHTML = rewardsList.map(r => `
+                        <div class="item-card loyalty-reward-card">
+                            <div>
+                                <span class="qty-badge loyalty-reward-badge">Koszt: ${r.cost} pieczątek</span>
+                                <div class="loyalty-reward-name">${r.name}</div>
+                            </div>
+                            <button class="quote-button claim-reward-btn loyalty-reward-btn" onclick="window.claimReward(this)" data-cost="${r.cost}" data-reward="${r.name}"><i class="fas fa-gift"></i> Odbierz nagrodę</button>
+                        </div>
+                    `).join('');
+                } else {
+                    rewardsGrid.innerHTML = '<div style="color:var(--text-secondary); width:100%; grid-column: 1 / -1; text-align:center;">Brak dostępnych nagród. Szef musi je skonfigurować w panelu.</div>';
+                }
+            }
+            
+            document.getElementById('loyalty-customer-info').classList.remove('hidden');
+        } else {
+            currentLoyaltyCustomer = null;
+            document.getElementById('loyalty-customer-info').classList.add('hidden');
+            showNotice("Brak klienta o podanym SSN w bazie.", "warning");
+        }
+    } catch(e) {
+        showNotice("Błąd pobierania danych z bazy!", "danger");
+    } finally {
+        btn.disabled = false;
+        btn.innerText = origText;
+    }
+}
+
+window.claimReward = async function(btn) {
+    if(!currentLoyaltyCustomer) return showNotice("Wyszukaj najpierw klienta!", "warning");
+    
+    const cost = parseInt(btn.getAttribute('data-cost'));
+    const rewardName = btn.getAttribute('data-reward');
+    
+    if(currentLoyaltyCustomer.stamps < cost) {
+        return showNotice(`Niewystarczająca liczba pieczątek! Brakuje: ${cost - currentLoyaltyCustomer.stamps}`, "danger");
+    }
+    
+    if(!confirm(`Czy na pewno chcesz wydać ${cost} pieczątek na: ${rewardName}?`)) return;
+
+    const origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+    try {
+        const res = await fetch(REPORTS_API_URL, {
+            method: "POST",
+            body: JSON.stringify({
+                action: 'deduct_loyalty_stamps',
+                ssn: currentLoyaltyCustomer.ssn,
+                cost: cost
+            })
+        });
+
+        if (!res.ok) throw new Error("Błąd bazy danych");
+
+        const embedPayload = {
+            embeds: [{
+                title: "🎁 ODEBRANO NAGRODĘ LOJALNOŚCIOWĄ!",
+                color: 15844367, 
+                fields: [
+                    { name: "👤 Klient [SSN]:", value: `\`${currentLoyaltyCustomer.ssn}\``, inline: true },
+                    { name: "🧑‍💼 Wydał:", value: `\`${currentEmployeeName}\``, inline: true },
+                    { name: "🏆 Nagroda:", value: `**${rewardName}** (Koszt: ${cost} pieczątek)`, inline: false }
+                ],
+                timestamp: new Date().toISOString(),
+                footer: { text: "System EL CARTEL PAWN SHOP" }
+            }]
+        };
+
+        await fetch(DISCORD_WEBHOOK_URL_SKUP, { method: "POST", headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(embedPayload) });
+        
+        currentLoyaltyCustomer.stamps -= cost;
+        document.getElementById('loyalty-display-stamps').innerText = currentLoyaltyCustomer.stamps;
+        
+        showNotice("Nagroda odebrana! (Punkty pobrane)", "success");
+        window.addSystemLog('NAGRODA LOJALNOŚCIOWA', `Wydano nagrodę "${rewardName}" dla klienta SSN: ${currentLoyaltyCustomer.ssn}. Koszt: ${cost} pieczątek.`);
+
+    } catch(e) {
+        showNotice("Wystąpił błąd przy pobieraniu punktów!", "danger");
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = origHtml;
+    }
 }
 
 async function checkUpdates() {
@@ -2167,86 +3704,1457 @@ async function checkUpdates() {
         const data = await response.json();
         const serverVersion = data.version.trim();
         if (serverVersion !== APP_VERSION) {
-            if (localStorage.getItem('update_ignored_version') === serverVersion) {
-                return;
-            }
+            if (localStorage.getItem('update_ignored_version') === serverVersion) return;
             showUpdatePrompt(serverVersion);
         }
-    } catch (e) {
-    }
+    } catch (e) {}
 }
 
 function showUpdatePrompt(serverVersion) {
     if (document.getElementById('update-prompt')) return;
     const div = document.createElement('div');
-    div.id = 'update-prompt';
-    div.className = 'update-notify';
-    div.innerHTML = `
-        <span><i class="fas fa-sync-alt fa-spin"></i> Wgrano nową wersję systemu!</span>
-        <button class="update-btn-refresh" onclick="forceHardReload('${serverVersion}')">Odśwież</button>
-    `;
+    div.id = 'update-prompt'; div.className = 'update-notify';
+    div.innerHTML = `<span><i class="fas fa-sync-alt fa-spin"></i> Wgrano nową wersję!</span><button class="update-btn-refresh" onclick="forceHardReload('${serverVersion}')">Odśwież</button>`;
     document.body.appendChild(div);
 }
 
-window.forceHardReload = async function(serverVersion) {
-    if (serverVersion) {
-        localStorage.setItem('update_ignored_version', serverVersion);
-    }
-    if ('serviceWorker' in navigator) {
-        const registrations = await navigator.serviceWorker.getRegistrations();
-        for (let reg of registrations) {
-            await reg.unregister();
+function showForceReloadPrompt(reason, serverVersion, reloadId) {
+    if (document.getElementById('update-prompt')) return;
+    const div = document.createElement('div');
+    div.id = 'update-prompt'; 
+    div.className = 'update-notify';
+    
+    // Przycisk teraz przesyła reloadId do funkcji przeładowującej
+    div.innerHTML = `<span><i class="fas fa-exclamation-triangle"></i> Konieczne przeładowanie. Powód: ${reason}</span><button class="update-btn-refresh" onclick="forceHardReload('${serverVersion}', '${reloadId}')">Odśwież</button>`;
+    
+    document.body.appendChild(div);
+}
+
+window.forceHardReload = async function(serverVersion, reloadId) {
+    if (serverVersion) localStorage.setItem('update_ignored_version', serverVersion);
+    
+    // ZAPISUJEMY SYGNAŁ TYLKO JEŚLI KTOŚ FAKTYCZNIE KLIKNĄŁ PRZYCISK:
+    if (reloadId) localStorage.setItem('last_sys_reload', reloadId);
+    
+    try {
+        if ('serviceWorker' in navigator) { 
+            const registrations = await navigator.serviceWorker.getRegistrations(); 
+            for (let reg of registrations) await reg.unregister(); 
         }
-    }
-    if ('caches' in window) {
-        const cacheNames = await caches.keys();
-        for (let name of cacheNames) {
-            await caches.delete(name);
+        if ('caches' in window) { 
+            const cacheNames = await caches.keys(); 
+            for (let name of cacheNames) await caches.delete(name); 
         }
+
+        // --- NOWOŚĆ: TWARDY HACK NA PAMIĘĆ PRZEGLĄDARKI ---
+        // Zmuszamy przeglądarkę do pobrania najnowszych plików z serwera (omijając dysk)
+        // zanim w ogóle odświeżymy stronę.
+        await fetch(`script.js?v=${APP_VERSION}`, { cache: 'reload' }).catch(() => {});
+        await fetch(`style.css?v=${APP_VERSION}`, { cache: 'reload' }).catch(() => {});
+        await fetch(`style-sprzedaz.css?v=${APP_VERSION}`, { cache: 'reload' }).catch(() => {});
+        // ---------------------------------------------------
+
+    } catch (e) {
+        console.log("Ignoruję błąd czyszczenia pamięci, wymuszam przeładowanie.", e);
     }
+    
+    // Odświeżenie strony (teraz przeglądarka załaduje te nowo pobrane pliki)
     window.location.href = window.location.pathname + '?refresh=' + new Date().getTime();
+};
+
+// ==========================================
+// SYSTEM WYMUSZANIA GLOBALNEGO ODŚWIEŻENIA SYSTEMU
+// ==========================================
+window.forceGlobalReload = async function() {
+    if (!isTravisVance() && currentEmployeeSsn !== "4") return showNotice("Brak uprawnień!", "danger");
+    
+    // NOWE: Pytamy admina o powód. Jeśli kliknie "Anuluj" lub nic nie wpisze - przerywamy.
+    const reason = prompt("Podaj powód wymuszenia odświeżenia strony u wszystkich pracowników:");
+    if (reason === null || reason.trim() === "") {
+        return showNotice("Anulowano. Musisz podać powód!", "warning");
+    }
+
+    const btn = document.getElementById('admin-force-reload-btn');
+    if (btn) { btn.style.pointerEvents = 'none'; btn.style.opacity = '0.5'; }
+
+    const reloadId = Date.now().toString();
+    // Kodujemy powód w wiadomości do formatu: sys_reload|||ID|||Powód
+    const encodedMsg = "sys_reload|||" + reloadId + "|||" + reason.trim();
+
+    try {
+        await fetch(REPORTS_API_URL, {
+            method: "POST",
+            body: JSON.stringify({
+                action: "save_receipt",
+                type: "pager_message",
+                date: getFormattedDateTime(),
+                employee: currentEmployeeName,
+                report_id: reloadId,
+                items: [{ name: encodedMsg, qty: 1, total: 0 }],
+                ssn: "ALL"
+            })
+        });
+        showNotice("Sygnał przeładowania wysłany!", "success");
+        window.addSystemLog('SYSTEM', `Wymuszono globalne odświeżenie. Powód: ${reason.trim()}`);
+        document.getElementById('user-dropdown').classList.remove('active');
+    } catch (e) {
+        showNotice("Błąd nadajnika sygnału.", "danger");
+    } finally {
+        if (btn) { btn.style.pointerEvents = 'auto'; btn.style.opacity = '1'; }
+    }
 };
 
 setInterval(checkUpdates, 60000);
 setTimeout(checkUpdates, 3000);
 
-// ==========================================
-// OBSŁUGA ZDARZEŃ DOM
-// ==========================================
+window.updateOnlineEmployees = async function() {
+    try {
+        // ZMIANA: Nie czyścimy cache (reportsFetchPromise = null), żeby nie niszczyć płynności strony.
+        // Zamiast tego odpytujemy nowy lekki endpoint tylko o daty i nicki z dzisiaj.
+        const res = await fetch(`${REPORTS_API_URL}?action=get_online_activity&t=${Date.now()}`);
+        const data = await res.json();
+        
+        const now = new Date().getTime();
+        const startOfToday = new Date().setHours(0, 0, 0, 0); 
+        
+        const empStats = new Map();
+        const userTransactions = {};
+
+        data.forEach(row => {
+            if (row.employee && row.date && row.employee !== "System") {
+                const cleanName = String(row.employee).replace(/\s*\([^)]+\)/g, '').trim();
+                
+                const txTime = parseDate(row.date).getTime();
+                if (!isNaN(txTime) && txTime >= startOfToday) {
+                    if (!userTransactions[cleanName]) userTransactions[cleanName] = [];
+                    userTransactions[cleanName].push(txTime);
+                }
+            }
+        });
+
+        for (const [emp, times] of Object.entries(userTransactions)) {
+            times.sort((a, b) => b - a); 
+            let lastSeen = times[0];
+            let firstSeen = times[0];
+            
+            for (let i = 1; i < times.length; i++) {
+                if (firstSeen - times[i] <= 60 * 60 * 1000) { 
+                    firstSeen = times[i];
+                } else {
+                    break; 
+                }
+            }
+            empStats.set(emp, { lastSeen, firstSeen });
+        }
+
+        const myCurrentCleanName = currentEmployeeName ? String(currentEmployeeName).replace(/\s*\([^)]+\)/g, '').trim() : "";
+        
+        if (myCurrentCleanName) {
+            if (!window.mySessionStart) window.mySessionStart = now;
+            if (!empStats.has(myCurrentCleanName)) {
+                empStats.set(myCurrentCleanName, { lastSeen: now, firstSeen: window.mySessionStart });
+            } else {
+                const stats = empStats.get(myCurrentCleanName);
+                stats.lastSeen = now; 
+                stats.firstSeen = window.mySessionStart; 
+            }
+        }
+
+        const onlineData = [];
+        empStats.forEach((stats, name) => {
+            if (now - stats.lastSeen <= 15 * 60 * 1000 || name === myCurrentCleanName) {
+                const diffMs = Math.max(0, now - stats.firstSeen);
+                const diffMins = Math.floor(diffMs / 60000);
+                const hours = Math.floor(diffMins / 60);
+                const mins = diffMins % 60;
+                
+                let timeStr = "";
+                if (hours > 0) timeStr += `${hours}h `;
+                timeStr += `${mins}m`;
+                if (hours === 0 && mins === 0) timeStr = "< 1m";
+                
+                onlineData.push({ name: name, timeStr: timeStr });
+            }
+        });
+
+        renderOnlineWidget(onlineData);
+    } catch (e) {
+        console.error("Błąd widgetu online:", e);
+    }
+}
+
+function renderOnlineWidget(onlineData) {
+    const widget = document.getElementById('online-employees-widget');
+    if (!widget) return;
+
+    if (onlineData.length === 0) {
+        widget.classList.add('hidden');
+        widget.innerHTML = '';
+        return;
+    }
+
+    widget.classList.remove('hidden');
+    let html = '';
+    
+    onlineData.forEach((user, index) => {
+        const emp = window.currentEmployeesList.find(e => e.name === user.name);
+        const photo = (emp && emp.photo) ? emp.photo : ''; 
+        const avatarHtml = photo 
+            ? `<img src="${photo}" class="online-avatar">` 
+            : `<div class="online-avatar" style="display:flex; justify-content:center; align-items:center; background:var(--border-color); color:var(--text-secondary); font-size:1.2rem; width:100%; height:100%; border-radius:50%;"><i class="fas fa-user"></i></div>`;
+
+        html += `
+            <div class="online-avatar-container" style="z-index: ${100 - index}">
+                ${avatarHtml}
+                <div class="online-status-dot"></div>
+                <div class="online-tooltip">${user.name} [${user.timeStr}]</div>
+            </div>
+        `;
+    });
+
+    widget.innerHTML = html;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+    const ambientContainer = document.createElement('div');
+    ambientContainer.id = 'ambient-background';
+    document.body.prepend(ambientContainer);
+
+    for (let i = 0; i < 50; i++) {
+        const particle = document.createElement('div');
+        particle.className = 'ambient-particle';
+        
+        const size = Math.random() * 2 + 1; 
+        particle.style.width = `${size}px`;
+        particle.style.height = `${size}px`;
+        particle.style.left = `${Math.random() * 100}vw`;
+        particle.style.animationDuration = `${Math.random() * 15 + 10}s`; 
+        particle.style.animationDelay = `${Math.random() * 10}s`;
+        
+        ambientContainer.appendChild(particle);
+    }
     const loginPinInput = document.getElementById('employee-login-pin');
-    if (loginPinInput) {
-        loginPinInput.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') login();
+    if (loginPinInput) loginPinInput.addEventListener('keypress', function(e) { if (e.key === 'Enter') login(); });
+
+    document.querySelectorAll('#nav-skup-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => { e.preventDefault(); switchView('skup'); });
+    });
+
+    document.querySelectorAll('#nav-export-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => { e.preventDefault(); switchView('export'); });
+        btn.addEventListener('mouseenter', () => {
+            window.preloadReportsData();
+            window.preloadErrorReportsData();
+        });
+    });
+
+    document.querySelectorAll('#loyalty-floating-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => { 
+            e.preventDefault(); 
+            switchView('loyalty'); 
+            showNotice("UWAGA: System lojalnościowy jest w fazie testów i aktualnie nie obowiązuje w grze!", "warning");
+            
+            const display = document.getElementById('current-loyalty-rate-display');
+            if (display && display.textContent.includes('Ładowanie') && typeof REPORTS_API_URL !== 'undefined') {
+                try {
+                    const res = await fetch(REPORTS_API_URL + "?action=get_loyalty_settings&t=" + new Date().getTime());
+                    const data = await res.json();
+                    if (data.rate) {
+                        display.innerText = data.rate + "$ = 1 pieczątka";
+                    } else {
+                        display.innerText = "Brak danych";
+                    }
+                } catch(e) {
+                    display.innerText = "Błąd API";
+                }
+            }
+        });
+    });
+
+    document.querySelectorAll('#check-loyalty-btn').forEach(btn => btn.addEventListener('click', window.checkLoyaltyCustomer));
+    document.getElementById('loyalty-search-ssn')?.addEventListener('keypress', function(e) { if (e.key === 'Enter') window.checkLoyaltyCustomer(); });
+
+    document.querySelectorAll('.claim-reward-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => window.claimReward(e.currentTarget));
+    });
+
+    // PODPIĘCIE MENU DLA WSZYSTKICH WIDOKÓW (SKUP, EKSPORT, ZŁOTO)
+    document.querySelectorAll('#profile-toggle-btn').forEach(btn => btn.addEventListener('click', toggleUserMenu));
+    document.querySelectorAll('#menu-id-card').forEach(btn => btn.addEventListener('click', openIdCard));
+    
+    document.querySelectorAll('#menu-my-stats').forEach(btn => {
+        btn.addEventListener('click', openMyStats);
+        btn.addEventListener('mouseenter', () => window.preloadReportsData());
+    });
+
+    document.querySelectorAll('#menu-my-trans').forEach(btn => {
+        btn.addEventListener('click', openMyTransactions);
+        btn.addEventListener('mouseenter', () => {
+            window.preloadReportsData();
+            window.preloadBonusesData();
+        });
+    });
+
+    document.querySelectorAll('#menu-achievements').forEach(btn => {
+        btn.addEventListener('click', openAchievements);
+        btn.addEventListener('mouseenter', () => {
+            window.preloadReportsData();
+            window.preloadErrorReportsData();
+        });
+    });
+
+    document.getElementById('close-achievements-btn')?.addEventListener('click', closeAchievements);
+    document.querySelectorAll('#menu-changelog').forEach(btn => btn.addEventListener('click', openChangelog));
+    document.querySelectorAll('#admin-changelog-btn').forEach(btn => btn.addEventListener('click', openAdminChangelog));
+    document.querySelectorAll('#admin-reports-btn').forEach(btn => btn.addEventListener('click', openAdminReports));
+    document.querySelectorAll('#menu-settings').forEach(btn => btn.addEventListener('click', openSettings));
+    document.querySelectorAll('#menu-logout').forEach(btn => btn.addEventListener('click', logout));
+    
+    document.querySelectorAll('#menu-pager').forEach(btn => btn.addEventListener('click', window.openPagerPrompt));
+
+    document.getElementById('login-btn-action')?.addEventListener('click', login);
+
+    // ==========================================
+    // FUNKCJA POMOCNICZA: USUWANIE POLSKICH ZNAKÓW
+    // ==========================================
+    window.removePolishDiacritics = function(str) {
+        if (!str) return "";
+        const diacriticsMap = {
+            'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n', 'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z',
+            'Ą': 'a', 'Ć': 'c', 'Ę': 'e', 'Ł': 'l', 'Ń': 'n', 'Ó': 'o', 'Ś': 's', 'Ź': 'z', 'Ż': 'z'
+        };
+        return str.replace(/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/g, match => diacriticsMap[match]).toLowerCase();
+    };
+
+    // ==========================================
+    // SMART INPUT - WYSZUKIWARKA I SZYBKIE DODAWANIE (SKUP)
+    // ==========================================
+    const searchInputEl = document.getElementById('search-input');
+    if (searchInputEl) {
+        searchInputEl.addEventListener('input', applyFilters);
+        searchInputEl.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const rawQuery = this.value.trim();
+                if (!rawQuery) return;
+
+                const queries = rawQuery.split(',');
+                let itemsAdded = false;
+                let hasErrors = false;
+
+                queries.forEach(query => {
+                    const cleanQuery = query.trim();
+                    if (!cleanQuery) return;
+
+                    let itemName = cleanQuery;
+                    let qty = 1;
+
+                    // SPRAWDZANIE DWÓCH WARIANTÓW:
+                    const prefixMatch = cleanQuery.match(/^[xX*]\s*(\d+)\s+(.+)$/);
+                    const suffixMatch = cleanQuery.match(/(.+?)\s*[xX*]\s*(\d+)$/);
+
+                    if (prefixMatch) {
+                        qty = parseInt(prefixMatch[1], 10);
+                        itemName = prefixMatch[2].trim();
+                    } else if (suffixMatch) {
+                        itemName = suffixMatch[1].trim();
+                        qty = parseInt(suffixMatch[2], 10);
+                    }
+
+                    const normalizedSearch = window.removePolishDiacritics(itemName);
+                    
+                    // KROK 1: Szukamy idealnego dopasowania
+                    let index = inventory.findIndex(item => window.removePolishDiacritics(item.name) === normalizedSearch);
+                    
+                    // KROK 2: Jeśli nie ma idealnego, szukamy czy nazwa ZAWIERA wpisane słowo (np. "laptop" w "komputer (laptop)")
+                    if (index === -1) {
+                        index = inventory.findIndex(item => window.removePolishDiacritics(item.name).includes(normalizedSearch));
+                    }
+
+                    if (index !== -1) {
+                        window.updateCount(index, qty); 
+                        showNotice(`Dodano do koszyka: "${inventory[index].name}" [x${qty}]`, 'success');
+                        itemsAdded = true;
+                    } else {
+                        showNotice(`Nie znaleziono asortymentu: "${itemName}"`, 'warning');
+                        hasErrors = true;
+                    }
+                });
+
+                if (itemsAdded) {
+                    this.value = ''; 
+                    applyFilters(); 
+                }
+                
+                if (hasErrors) {
+                    this.classList.add('error-shake');
+                    setTimeout(() => this.classList.remove('error-shake'), 400);
+                }
+            }
         });
     }
 
-    const searchInput = document.getElementById('search-input');
-    if(searchInput) searchInput.addEventListener('input', applyFilters);
+    // ==========================================
+    // SMART INPUT - WYSZUKIWARKA I SZYBKIE DODAWANIE (SPRZEDAŻ)
+    // ==========================================
+    const searchInputExportEl = document.getElementById('search-input-export');
+    if (searchInputExportEl) {
+        searchInputExportEl.addEventListener('input', applyFiltersExport);
+        searchInputExportEl.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const rawQuery = this.value.trim();
+                if (!rawQuery) return;
+
+                const queries = rawQuery.split(',');
+                let itemsAdded = false;
+                let hasErrors = false;
+
+                queries.forEach(query => {
+                    const cleanQuery = query.trim();
+                    if (!cleanQuery) return;
+
+                    let itemName = cleanQuery;
+                    let qty = 1;
+
+                    const prefixMatch = cleanQuery.match(/^[xX*]\s*(\d+)\s+(.+)$/);
+                    const suffixMatch = cleanQuery.match(/(.+?)\s*[xX*]\s*(\d+)$/);
+
+                    if (prefixMatch) {
+                        qty = parseInt(prefixMatch[1], 10);
+                        itemName = prefixMatch[2].trim();
+                    } else if (suffixMatch) {
+                        itemName = suffixMatch[1].trim();
+                        qty = parseInt(suffixMatch[2], 10);
+                    }
+
+                    const normalizedSearch = window.removePolishDiacritics(itemName);
+                    
+                    // KROK 1: Szukamy idealnego dopasowania
+                    let index = exportInventory.findIndex(item => window.removePolishDiacritics(item.name) === normalizedSearch);
+                    
+                    // KROK 2: Jeśli nie ma idealnego, szukamy czy nazwa ZAWIERA wpisane słowo
+                    if (index === -1) {
+                        index = exportInventory.findIndex(item => window.removePolishDiacritics(item.name).includes(normalizedSearch));
+                    }
+
+                    if (index !== -1) {
+                        window.updateCountExport(index, qty);
+						showNotice(`Dodano do koszyka: "${exportInventory[index].name}" [x${qty}]`, 'success');
+                        itemsAdded = true;
+                    } else {
+                        showNotice(`Nie znaleziono asortymentu: "${itemName}"`, 'warning');
+                        hasErrors = true;
+                    }
+                });
+
+                if (itemsAdded) {
+                    this.value = ''; 
+                    applyFiltersExport(); 
+                }
+                
+                if (hasErrors) {
+                    this.classList.add('error-shake');
+                    setTimeout(() => this.classList.remove('error-shake'), 400);
+                }
+            }
+        });
+    }
+
+    document.querySelectorAll('#skup-categories .cat-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => filterCategory(e.currentTarget.dataset.category, e.currentTarget));
+    });
+
+    document.querySelectorAll('#export-categories .cat-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => filterCategoryExport(e.currentTarget.dataset.category, e.currentTarget));
+    });
+
+    document.getElementById('ad-input')?.addEventListener('input', updateAdPreview);
+    document.getElementById('copy-ad-btn-action')?.addEventListener('click', copyAd);
+
+    document.querySelectorAll('#ad-tags-container .tag-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => insertTag(e.currentTarget.dataset.tag));
+    });
+
+    document.getElementById('add-custom-slot-btn')?.addEventListener('click', addCustomItemSlot);
+    document.getElementById('add-custom-slot-btn-export')?.addEventListener('click', addCustomItemSlotExport);
+    
+    document.getElementById('mobile-toggle-btn')?.addEventListener('click', toggleSummary);
+    document.getElementById('summary-toggle-export')?.addEventListener('click', toggleSummaryExport);
+    
+    document.getElementById('cart-toggle-btn')?.addEventListener('click', toggleCart);
+    document.getElementById('cart-toggle-btn-export')?.addEventListener('click', toggleCartExport);
+    
+    document.getElementById('quote-btn')?.addEventListener('click', generateQuote);
+    document.getElementById('quote-btn-export')?.addEventListener('click', generateQuoteExport);
 
     const finalPriceInput = document.getElementById('final-price-input');
-    if(finalPriceInput) {
-        finalPriceInput.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') generateQuote();
+    if(finalPriceInput) finalPriceInput.addEventListener('keypress', function(e) { if (e.key === 'Enter') generateQuote(); });
+	
+	// Obsługa klawisza Enter dla widoku Sprzedaży (w polu SSN)
+    const ssnInputExport = document.getElementById('customer-ssn-input-export');
+    if(ssnInputExport) ssnInputExport.addEventListener('keypress', function(e) { if (e.key === 'Enter') generateQuoteExport(); });
+
+    // PODPIĘCIE NOWYCH PRZYCISKÓW Z FUNKCJĄ COFANIA (UNDO)
+    document.getElementById('reset-btn')?.addEventListener('click', window.clearCartWithUndo);
+    document.getElementById('reset-btn-export')?.addEventListener('click', window.clearCartExportWithUndo);
+
+    document.getElementById('close-cart-btn')?.addEventListener('click', toggleCart);
+    document.getElementById('close-cart-btn-export')?.addEventListener('click', toggleCartExport);
+    
+    document.getElementById('close-quote-modal-btn')?.addEventListener('click', closeModal);
+    document.getElementById('send-discord-btn')?.addEventListener('click', sendToDiscord);
+    document.getElementById('copy-receipt-btn')?.addEventListener('click', copyReceiptToClipboard);
+
+    document.getElementById('close-quote-modal-export-btn')?.addEventListener('click', closeModalExport);
+    document.getElementById('close-quote-modal-export-btn-2')?.addEventListener('click', closeModalExport);
+    document.getElementById('send-discord-btn-export')?.addEventListener('click', sendToDiscordExport);
+
+    document.getElementById('close-settings-modal-btn')?.addEventListener('click', closeSettings);
+    document.getElementById('change-pin-btn')?.addEventListener('click', changeEmployeePin);
+
+    document.getElementById('close-my-stats-btn')?.addEventListener('click', closeMyStats);
+    document.getElementById('my-stats-time-filter')?.addEventListener('change', (e) => changeStatsTimeRange(e.target.value));
+
+    document.querySelectorAll('#stats-view-toggles .my-stats-toggle-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => switchStatsView(e.currentTarget.dataset.view));
+    });
+
+    document.getElementById('close-my-transactions-btn')?.addEventListener('click', closeMyTransactions);
+    document.querySelectorAll('#trans-view-toggles .my-stats-toggle-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => switchTransView(e.currentTarget.dataset.view));
+    });
+
+    document.getElementById('close-report-modal-btn')?.addEventListener('click', closeReportModal);
+    document.getElementById('submit-report-btn')?.addEventListener('click', submitTransactionReport);
+
+    document.getElementById('close-admin-reports-btn')?.addEventListener('click', closeAdminReports);
+    
+    document.getElementById('close-changelog-modal-btn')?.addEventListener('click', closeChangelog);
+    document.getElementById('close-admin-changelog-btn')?.addEventListener('click', closeAdminChangelog);
+    document.getElementById('add-admin-change-slot-btn')?.addEventListener('click', addAdminChangeSlot);
+    document.getElementById('publish-changelog-btn')?.addEventListener('click', publishChangelog);
+
+    document.getElementById('close-edit-changelog-btn')?.addEventListener('click', closeEditChangelog);
+    document.getElementById('add-edit-change-slot-btn')?.addEventListener('click', addEditChangeSlot);
+    document.getElementById('save-edit-cl-btn')?.addEventListener('click', saveEditedChangelog);
+    
+    document.getElementById('close-id-card-btn')?.addEventListener('click', closeIdCard);
+    document.getElementById('close-bonus-notification-btn')?.addEventListener('click', closeBonusNotification);
+    document.getElementById('claim-bonus-notification-btn')?.addEventListener('click', closeBonusNotification);
+
+    document.getElementById('close-pager-modal-btn')?.addEventListener('click', () => document.getElementById('pager-modal').classList.remove('active'));
+    document.getElementById('submit-pager-btn')?.addEventListener('click', window.sendPagerMessage);
+
+    const handleListClick = (e, listType) => {
+        const btn = e.target.closest('.btn-circle') || e.target.closest('.cart-btn-circle');
+        if (btn) {
+            const index = parseInt(btn.getAttribute('data-index'));
+            const action = btn.getAttribute('data-action');
+            if (action === 'add') {
+                if(listType === 'skup') updateCount(index, 1);
+                else updateCountExport(index, 1);
+            } else if (action === 'minus') {
+                if(listType === 'skup') updateCount(index, -1);
+                else updateCountExport(index, -1);
+            }
+        }
+    };
+
+    document.getElementById('items-list')?.addEventListener('click', (e) => handleListClick(e, 'skup'));
+    document.getElementById('items-list-export')?.addEventListener('click', (e) => handleListClick(e, 'export'));
+    document.getElementById('cart-items-container')?.addEventListener('click', (e) => handleListClick(e, 'skup'));
+    document.getElementById('cart-items-container-export')?.addEventListener('click', (e) => handleListClick(e, 'export'));
+
+    const handleListInput = (e, listType) => {
+        if(e.target.classList.contains('quantity-input')) {
+            const index = parseInt(e.target.getAttribute('data-index'));
+            if(listType === 'skup') handleInput(index, e.target.value);
+            else handleInputExport(index, e.target.value);
+        } else if (e.target.classList.contains('custom-item-name') || e.target.classList.contains('custom-name-input')) {
+            const index = parseInt(e.target.getAttribute('data-index'));
+            if(listType === 'skup') updateCustomName(index, e.target.value);
+            else updateCustomNameExport(index, e.target.value);
+        } else if (e.target.classList.contains('custom-item-price') || e.target.classList.contains('custom-price-input')) {
+            const index = parseInt(e.target.getAttribute('data-index'));
+            if(listType === 'skup') updateCustomPrice(index, e.target.value);
+            else updateCustomPriceExport(index, e.target.value);
+        }
+    };
+
+    document.getElementById('items-list')?.addEventListener('input', (e) => handleListInput(e, 'skup'));
+    document.getElementById('items-list-export')?.addEventListener('input', (e) => handleListInput(e, 'export'));
+
+// Obsługa usuwania wierszy
+    const handleAdminSlotRemove = (e) => {
+        const btn = e.target.closest('.btn-delete-slot');
+        if (btn) {
+            const slot = btn.closest('.admin-change-slot-layout');
+            if (slot) slot.remove();
+        }
+    };
+    
+    document.getElementById('admin-changes-list')?.addEventListener('click', handleAdminSlotRemove);
+    document.getElementById('edit-cl-changes-list')?.addEventListener('click', handleAdminSlotRemove);
+
+    // --- ZAAWANSOWANY MECHANIZM DRAG & DROP ---
+    let draggingSlot = null;
+
+    const setupSortableList = (listId) => {
+        const list = document.getElementById(listId);
+        if (!list) return;
+
+        // Moment złapania kafelka myszką
+        list.addEventListener('dragstart', e => {
+            const slot = e.target.closest('.admin-change-slot-layout');
+            if (!slot) return;
+            draggingSlot = slot;
+            // Lekkie ściemnienie, by było widać, co aktualnie trzymamy
+            setTimeout(() => slot.style.opacity = '0.4', 0);
+        });
+
+        // Upuszczenie kafelka
+        list.addEventListener('dragend', e => {
+            if (draggingSlot) {
+                draggingSlot.style.opacity = '1';
+                draggingSlot = null;
+            }
+        });
+
+        // Najeżdżanie trzymanym kafelkiem na inne elementy
+        list.addEventListener('dragover', e => {
+            e.preventDefault(); // Wymagane, żeby pozwolić na upuszczenie
+            if (!draggingSlot) return;
+            
+            const afterElement = getDragAfterElement(list, e.clientY);
+            if (afterElement == null) {
+                list.appendChild(draggingSlot);
+            } else {
+                list.insertBefore(draggingSlot, afterElement);
+            }
+        });
+    };
+
+    // Matematyka: Sprawdzanie, nad którym kafelkiem znajduje się myszka i czy przesunąć to nad, czy pod niego
+    function getDragAfterElement(container, y) {
+        const draggableElements = [...container.querySelectorAll('.admin-change-slot-layout:not([style*="opacity: 0.4"])')];
+        
+        return draggableElements.reduce((closest, child) => {
+            const box = child.getBoundingClientRect();
+            const offset = y - box.top - box.height / 2;
+            if (offset < 0 && offset > closest.offset) {
+                return { offset: offset, element: child };
+            } else {
+                return closest;
+            }
+        }, { offset: Number.NEGATIVE_INFINITY }).element;
+    }
+
+    setupSortableList('admin-changes-list');
+    setupSortableList('edit-cl-changes-list');
+
+    document.getElementById('dynamic-changelog-container')?.addEventListener('click', (e) => {
+        const btnEdit = e.target.closest('.btn-admin-edit');
+        if(btnEdit) openEditChangelog(btnEdit.getAttribute('data-version'), btnEdit.getAttribute('data-items'));
+        const btnDel = e.target.closest('.btn-admin-del');
+        if(btnDel) deleteChangelog(btnDel.getAttribute('data-version'));
+    });
+
+    document.getElementById('transactions-list-container')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('.report-error-btn');
+        if(btn) openReportModal(btn.getAttribute('data-id'));
+    });
+
+    document.getElementById('admin-reports-container')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-action="admin-status"]');
+        if(btn) updateReportStatus(btn.getAttribute('data-id'), btn.getAttribute('data-status'));
+    });
+
+    const tiltCard = document.getElementById('tilt-card-element');
+    const glare = document.querySelector('.id-card-glare');
+
+    if (tiltCard) {
+        tiltCard.addEventListener('mousemove', (e) => {
+            const rect = tiltCard.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            const centerX = rect.width / 2;
+            const centerY = rect.height / 2;
+            
+            const rotateY = ((x - centerX) / centerX) * 12;
+            const rotateX = ((centerY - y) / centerY) * 12;
+
+            tiltCard.style.transform = `rotateX(${rotateX}deg) rotateY(${rotateY}deg)`;
+            tiltCard.style.boxShadow = `${-rotateY}px ${rotateX}px 40px rgba(0, 0, 0, 0.7)`;
+            
+            if (glare) {
+                glare.style.opacity = '1';
+                glare.style.background = `radial-gradient(circle at ${x}px ${y}px, rgba(255,255,255,0.3) 0%, transparent 60%)`;
+            }
+        });
+
+        tiltCard.addEventListener('mouseleave', () => {
+            tiltCard.style.transform = `rotateX(0deg) rotateY(0deg)`;
+            tiltCard.style.boxShadow = `0 10px 30px rgba(0,0,0,0.5)`;
+            if (glare) glare.style.opacity = '0';
         });
     }
 
-    const resetBtnSkup = document.getElementById('reset-btn');
-    if(resetBtnSkup) {
-        resetBtnSkup.onclick = () => {
-            resetCartAndInventory();
-            showNotice("Wyczyszczono koszyk!", "warning");
-        };
+    const toggleSkup = document.getElementById('toggle-images-skup');
+    if (toggleSkup) {
+        toggleSkup.checked = showImagesSkup;
+        toggleSkup.addEventListener('change', (e) => {
+            showImagesSkup = e.target.checked;
+            localStorage.setItem('elcartel_images_skup', showImagesSkup);
+            renderInventory();
+        });
+    }
+    
+    const toggleExport = document.getElementById('toggle-images-export');
+    if (toggleExport) {
+        toggleExport.checked = showImagesExport;
+        toggleExport.addEventListener('change', (e) => {
+            showImagesExport = e.target.checked;
+            localStorage.setItem('elcartel_images_export', showImagesExport);
+            renderInventoryExport();
+        });
     }
 
-    const searchInputExport = document.getElementById('search-input-export');
-    if (searchInputExport) searchInputExport.addEventListener('input', applyFiltersExport);
+    // --- OBSŁUGA PRZEŁĄCZNIKA DŹWIĘKÓW W USTAWIENIACH ---
+    const toggleAudio = document.getElementById('toggle-audio-settings');
+    if (toggleAudio) {
+        toggleAudio.checked = localStorage.getItem('elcartel_audio_enabled') !== 'false';
+        toggleAudio.addEventListener('change', (e) => {
+            localStorage.setItem('elcartel_audio_enabled', e.target.checked);
+            if (e.target.checked) {
+                window.playSystemSound('info'); // Krótkie piknięcie testowe przy włączeniu
+            }
+        });
+    }
+});
 
-    const resetBtnExport = document.getElementById('reset-btn-export');
-    if (resetBtnExport) {
-        resetBtnExport.onclick = () => {
-            resetCartAndInventoryExport();
-            showNotice("Wyczyszczono listę!", "warning");
-        };
+/* ==========================================================================
+   SYSTEM WEWNĘTRZNYCH KOMUNIKATÓW (PAGER / KRÓTKOFALÓWKA) - ZAAWANSOWANY MODAL
+   ========================================================================== */
+let lastPagerTimestamp = Date.now();
+
+// Otwieranie Modalu (Wczytuje listę aktywnych pracowników)
+window.openPagerPrompt = function() {
+    document.getElementById('user-dropdown').classList.remove('active');
+    document.getElementById('pager-msg-input').value = ""; 
+    
+    const targetSelect = document.getElementById('pager-target-input');
+    if (targetSelect) {
+        targetSelect.innerHTML = '<option value="ALL">Wszyscy</option>';
+        if (window.currentEmployeesList && window.currentEmployeesList.length > 0) {
+            window.currentEmployeesList.forEach(emp => {
+                const cleanEmpName = String(emp.name).replace(/\s*\([^)]+\)/g, '').trim();
+                targetSelect.innerHTML += `<option value="${String(emp.ssn)}">${cleanEmpName} (SSN: ${emp.ssn})</option>`;
+            });
+        }
+    }
+    
+    document.getElementById('pager-modal').classList.add('active');
+}
+
+window.sendPagerMessage = function() {
+    const msg = document.getElementById('pager-msg-input').value.trim();
+    const color = document.getElementById('pager-color-input').value;
+    const duration = document.getElementById('pager-duration-input').value;
+    const targetSsn = document.getElementById('pager-target-input').value;
+
+    if (!msg) return showNotice("Wpisz treść komunikatu!", "warning");
+
+    const btn = document.getElementById('submit-pager-btn');
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Nadawanie...';
+
+    const encodedMsg = `${color}|||${duration}|||${msg}`;
+
+    const payload = {
+        action: "save_receipt",
+        type: "pager_message",
+        date: getFormattedDateTime(),
+        employee: currentEmployeeName,
+        report_id: Date.now().toString(), 
+        items: [{ name: encodedMsg, qty: 1, total: 0 }],
+        ssn: targetSsn 
+    };
+
+    fetch(REPORTS_API_URL, { 
+        method: "POST", 
+        body: JSON.stringify(payload) 
+    }).then(() => {
+        showNotice("Komunikat wysłany!", "success");
+        window.addSystemLog('PAGER (KOMUNIKAT)', `Wysłano wiadomość z pagera (Odbiorca SSN: ${targetSsn}). Treść: ${msg}`);
+        document.getElementById('pager-modal').classList.remove('active'); 
+    }).catch(e => {
+        showNotice("Zakłócenia! Błąd nadajnika.", "danger");
+    }).finally(() => {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+    });
+}
+
+async function checkPagerMessages() {
+    if (!currentEmployeeName) return; 
+
+    try {
+        // ZMIANA: Pobieramy tylko 20 ostatnich wiadomości z pagera, a nie całą historię kasy!
+        const res = await fetch(`${REPORTS_API_URL}?action=get_pager&t=${Date.now()}`);
+        const messages = await res.json();
+        
+        // --- INTERCEPTOR GLOBALNEGO ODŚWIEŻENIA (Kuloodporny na F5) ---
+        const reloadMessages = messages.filter(m => String(m.name).startsWith("sys_reload"));
+        if (reloadMessages.length > 0) {
+            const latestReload = reloadMessages.reduce((latest, current) => {
+                return parseInt(current.report_id) > parseInt(latest.report_id) ? current : latest;
+            });
+            
+            const parts = String(latestReload.name).split("|||");
+            const reloadId = parts[1];
+            const reason = parts[2] || "Brak podanego powodu";
+            
+            if (localStorage.getItem('last_sys_reload') !== reloadId) {
+                showForceReloadPrompt(reason, APP_VERSION, reloadId);
+            }
+        }
+        // --------------------------------------------------------------
+
+        let newestTimestamp = lastPagerTimestamp;
+
+        messages.forEach(m => {
+            const msgTime = parseInt(m.report_id);
+            
+            if (msgTime > lastPagerTimestamp) {
+                const targetSsn = String(m.ssn).trim();
+                const mySsn = String(currentEmployeeSsn).trim();
+                
+                const senderName = String(m.employee).trim().toLowerCase();
+                const myName = String(currentEmployeeName).trim().toLowerCase();
+
+                const isGlobal = (targetSsn === "ALL");
+                const isForMe = (targetSsn === mySsn);
+                const isFromMe = (senderName === myName);
+
+                if (isGlobal || (isForMe && !isFromMe)) {
+                    let msgText = m.name;
+
+                    if (msgText.startsWith("sys_reload")) {
+                        if (msgTime > newestTimestamp) newestTimestamp = msgTime;
+                        return; 
+                    }
+
+                    let msgColor = 'info';
+                    let msgDuration = 5000;
+
+                    if (msgText.includes('|||')) {
+                        const parts = msgText.split('|||');
+                        if (parts.length >= 3) {
+                            msgColor = parts[0];
+                            msgDuration = parseInt(parts[1]) || 5000;
+                            msgText = parts.slice(2).join('|||'); 
+                        }
+                    }
+
+                    showNotice(`${msgText}`, msgColor, msgDuration, 'pager');
+                }
+                
+                if (msgTime > newestTimestamp) newestTimestamp = msgTime;
+            }
+        });
+
+        lastPagerTimestamp = newestTimestamp;
+    } catch(e) {}
+}
+
+// ==========================================
+// FUNKCJE SYSTEMU SZYBKIEGO LOGOWANIA
+// ==========================================
+window.renderSavedProfiles = function() {
+    const container = document.getElementById('saved-profiles-container');
+    if (!container) return;
+    const profiles = JSON.parse(localStorage.getItem('elcartel_saved_profiles') || '[]');
+    
+    if (profiles.length === 0) {
+        container.innerHTML = '';
+        container.style.display = 'none';
+        return;
+    }
+    
+    container.style.display = 'flex';
+    let html = '';
+    
+    const now = new Date();
+    const dateStr = `${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')}.${now.getFullYear()}`;
+
+    profiles.forEach((p, index) => {
+        const avatarHtml = p.photo && p.photo !== "" 
+            ? `<img src="${p.photo}" class="saved-profile-avatar" alt="${p.name}">` 
+            : `<div class="saved-profile-avatar" style="display:flex; justify-content:center; align-items:center; font-size:1.5rem; color:var(--text-secondary);"><i class="fas fa-user-tie"></i></div>`;
+        
+        const statKey = `elcartel_stats_${p.name}_${dateStr}`;
+        const dailyEarned = parseFloat(localStorage.getItem(statKey)) || 0;
+        
+        html += `
+            <div class="saved-profile-card" onclick="quickLogin('${p.pin}')">
+                ${avatarHtml}
+                <span class="saved-profile-name">${p.name}</span>
+                <button class="remove-profile-btn" onclick="removeSavedProfile(${index}, event)" title="Usuń zapisany profil"><i class="fas fa-times"></i></button>
+                
+                <div class="profile-mini-stats">
+                    <div class="stats-header">Zapisany profil</div>
+                    <div class="stats-row">
+                        <span><i class="fas fa-star text-secondary"></i> Stopień:</span>
+                        <strong style="color: var(--accent-color); font-weight: 800;">${p.rank || 'Pracownik'}</strong>
+                    </div>
+                    <div class="stats-row">
+                        <span><i class="fas fa-hashtag text-secondary"></i> SSN:</span>
+                        <strong class="text-white-inline">${p.ssn || '---'}</strong>
+                    </div>
+                    <div class="stats-row">
+                        <span><i class="fas fa-calendar-alt text-secondary"></i> Zatrudnienie:</span>
+                        <strong class="text-white-inline" style="font-size: 0.75rem;">${p.dateZatrudnienia || 'Brak danych'}</strong>
+                    </div>
+                    <div class="stats-row">
+                        <span><i class="fas fa-chart-line text-secondary"></i> Utarg dziś:</span>
+                        <strong class="text-success">${window.formatMoney ? window.formatMoney(dailyEarned) : dailyEarned}$</strong>
+                    </div>
+                    <div class="stats-hint">Kliknij, aby zalogować</div>
+                </div>
+            </div>
+        `;
+    });
+    container.innerHTML = html;
+}
+
+window.quickLogin = function(pin) {
+    const pinInput = document.getElementById('employee-login-pin');
+    if (pinInput) {
+        pinInput.value = pin;
+        window.login(); // Automatycznie uruchamia proces logowania
+    }
+}
+
+window.removeSavedProfile = function(index, event) {
+    event.stopPropagation(); // Zapobiega kliknięciu w avatar przy usuwaniu
+    let profiles = JSON.parse(localStorage.getItem('elcartel_saved_profiles') || '[]');
+    profiles.splice(index, 1);
+    localStorage.setItem('elcartel_saved_profiles', JSON.stringify(profiles));
+    renderSavedProfiles();
+    showNotice("Usunięto zapisany profil.", "info");
+}
+
+// Wywołaj renderowanie profili od razu po załadowaniu strony
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof renderSavedProfiles === 'function') renderSavedProfiles();
+});
+
+// ==========================================
+// SYSTEM INTELIGENTNYCH POWITAŃ KASJERA
+// ==========================================
+window.updateTimeBasedGreeting = function() {
+    const now = new Date();
+    const hours = now.getHours();
+    let greetingText = "";
+    let iconClass = "";
+
+    if (hours >= 6 && hours < 12) {
+        greetingText = `Nowy dzień, nowy hajs. Odpalamy kasę, ${currentEmployeeName}.`;
+        iconClass = "fas fa-bolt text-warning";
+    } else if (hours >= 12 && hours < 18) {
+        greetingText = `Godziny szczytu, ${currentEmployeeName}. Kręcimy grube kwity.`;
+        iconClass = "fas fa-money-bill-wave text-success";
+    } else if (hours >= 18 && hours < 23) {
+        greetingText = `Słońce zachodzi, stawki rosną. Pilnuj towaru, ${currentEmployeeName}.`;
+        iconClass = "fas fa-user-secret text-danger";
+    } else {
+        greetingText = `Miasto śpi, my zarabiamy, ${currentEmployeeName}. Tylko zaufane deale.`;
+        iconClass = "fas fa-moon text-info";
+    }
+
+    const skupGreeting = document.getElementById('time-greeting-skup');
+    const exportGreeting = document.getElementById('time-greeting-export');
+    const fullHtml = `<i class="${iconClass}"></i> ${greetingText}`;
+
+    if (skupGreeting) skupGreeting.innerHTML = fullHtml;
+    if (exportGreeting) exportGreeting.innerHTML = fullHtml;
+}
+
+// ==========================================
+// ZEGAR CZASU RZECZYWISTEGO (Na żywo)
+// ==========================================
+window.startRealTimeClock = function() {
+    function updateClock() {
+        const now = new Date();
+        const dd = String(now.getDate()).padStart(2, '0');
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const yyyy = now.getFullYear();
+        
+        const hh = String(now.getHours()).padStart(2, '0');
+        const min = String(now.getMinutes()).padStart(2, '0');
+        const ss = String(now.getSeconds()).padStart(2, '0');
+        
+        // Budujemy nową datę z godziną, minutą i sekundą
+        const dateString = `<i class="far fa-clock"></i> ${dd}.${mm}.${yyyy} | ${hh}:${min}:${ss}`;
+        
+        const dateSkup = document.getElementById('header-date');
+        const dateExport = document.getElementById('header-date-export');
+        
+        if (dateSkup) dateSkup.innerHTML = dateString;
+        if (dateExport) dateExport.innerHTML = dateString;
+
+        // Mały bonus: jeśli zegar wbije idealnie pełną godzinę (np. z 17:59 na 18:00), 
+        // to dyskretnie odświeżamy też powitanie!
+        if (min === '00' && ss === '00') {
+            if (typeof updateTimeBasedGreeting === 'function') updateTimeBasedGreeting();
+        }
+    }
+    
+    // Odświeżaj co 1 sekundę (1000ms)
+    setInterval(updateClock, 1000);
+    // Odpal od razu przy wywołaniu, żeby nie czekać sekundy na pojawienie się daty
+    updateClock();
+}
+
+// Uruchomienie zegara w tle natychmiast po wejściu na stronę
+document.addEventListener('DOMContentLoaded', () => {
+    window.startRealTimeClock();
+});
+
+// ==========================================
+// ANIMACJE LICZNIKÓW (Count-Up)
+// ==========================================
+window.animateCountUp = function(element, target, duration, isMoney = false) {
+    if (!element) return;
+    
+    // Zabezpieczenie przed błędem z pustymi danymi (np. NaN)
+    const finalTarget = Number(target) || 0; 
+    const startValue = 0;
+    const startTime = performance.now();
+
+    function update(currentTime) {
+        const elapsed = currentTime - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        
+        // Funkcja Easingu (easeOutExpo) - zaczyna szybko, zwalnia na końcu
+        const easeOut = progress === 1 ? 1 : 1 - Math.pow(2, -10 * progress);
+        
+        const currentValue = Math.floor(startValue + (finalTarget - startValue) * easeOut);
+        
+        // Zastosowanie Twojej wbudowanej funkcji formatMoney, jeśli to waluta
+        if (isMoney) {
+            element.innerText = (window.formatMoney ? window.formatMoney(currentValue) : currentValue) + '$';
+        } else {
+            element.innerText = currentValue;
+        }
+
+        if (progress < 1) {
+            requestAnimationFrame(update);
+        } else {
+            // Wyrównanie do dokładnej kwoty końcowej na sam koniec
+            if (isMoney) {
+                element.innerText = (window.formatMoney ? window.formatMoney(finalTarget) : finalTarget) + '$';
+            } else {
+                element.innerText = finalTarget;
+            }
+        }
+    }
+    
+    requestAnimationFrame(update);
+}
+
+setInterval(checkPagerMessages, 15000);
+
+window.updateWarehouse = function(items, actionType) {
+    // items = [{ name: "Nazwa", qty: 2 }, ...]
+    // actionType = 'add' (skup) | 'remove' (sprzedaż)
+    
+    items.forEach(item => {
+        const name = item.name;
+        const qty = item.qty;
+        
+        if (!virtualWarehouse[name]) {
+            virtualWarehouse[name] = { qty: 0, image: null };
+        }
+        
+        if (actionType === 'add') {
+            virtualWarehouse[name].qty += qty;
+            
+            // Szukamy obrazka, żeby zapisać go w magazynie
+            const foundSkup = defaultInventory.find(i => i.name === name);
+            if (foundSkup && foundSkup.image) virtualWarehouse[name].image = foundSkup.image;
+        } else if (actionType === 'remove') {
+            virtualWarehouse[name].qty -= qty;
+            if (virtualWarehouse[name].qty <= 0) {
+                delete virtualWarehouse[name];
+            }
+        }
+    });
+    
+    // === SYSTEM POWIADOMIEŃ O POJEMNOŚCI ===
+    if (actionType === 'add') {
+        let totalUsedSlots = 0;
+        for (const [itemName, data] of Object.entries(virtualWarehouse)) {
+            totalUsedSlots += getItemSlotSize(itemName) * data.qty;
+        }
+        
+        const percent = (totalUsedSlots / MAX_WAREHOUSE_SLOTS) * 100;
+        const roundedPercent = Math.round(percent);
+        
+        if (roundedPercent >= 100) {
+            const msg = "❌ Magazyn jest w pełni zapełniony!";
+            if (typeof showNotice === 'function') showNotice(msg, "error");
+            else alert(msg);
+        } else if (roundedPercent >= 90) {
+            const msg = `⚠️ Uwaga! Magazyn jest prawie pełny (${roundedPercent}%).`;
+            if (typeof showNotice === 'function') showNotice(msg, "warning");
+            else alert(msg);
+        }
+        
+    }
+    // =======================================
+    
+    // Zapis do localStorage został usunięty, bazujemy na systemie chmurowym
+    renderWarehouse();
+};
+
+window.renderWarehouse = function() {
+    const grid = document.getElementById('warehouse-grid');
+    const usedEl = document.getElementById('wh-used');
+    const maxEl = document.getElementById('wh-max');
+    const progressEl = document.getElementById('wh-progress-bar');
+    const percentTextEl = document.getElementById('wh-percent-text');
+    const searchInput = document.getElementById('warehouse-search-input');
+    
+    if (!grid || !usedEl) return;
+
+    // Pobieramy wpisaną frazę i usuwamy polskie znaki dla ułatwienia szukania
+    const searchTerm = searchInput ? window.removePolishDiacritics(searchInput.value).trim() : '';
+    
+    let totalUsedSlots = 0; // Do paska pojemności (całkowita zajętość)
+    let displayedUsedSlots = 0; // Do generowania siatki i łatania dziur (tylko wyszukane)
+    let slotsHtml = '';
+    
+    for (const [name, data] of Object.entries(virtualWarehouse)) {
+        if (data.qty <= 0) continue;
+
+        const slotsPerStack = getItemSlotSize(name);
+        const maxStack = getItemMaxStack(name);
+        const stacksNeeded = Math.ceil(data.qty / maxStack);
+        
+        // Zawsze liczymy wszystko do całkowitej pojemności magazynu
+        totalUsedSlots += stacksNeeded * slotsPerStack;
+
+        // Sprawdzamy czy przedmiot pasuje do wyszukiwarki
+        const normalizedName = window.removePolishDiacritics(name);
+        if (!normalizedName.includes(searchTerm)) continue;
+
+        // Jeśli pasuje, to go rysujemy na siatce
+        let remainingQty = data.qty;
+        while (remainingQty > 0) {
+            const qtyInThisStack = Math.min(remainingQty, maxStack);
+            displayedUsedSlots += slotsPerStack;
+            
+            const imageHtml = data.image 
+                ? `<img src="${data.image}" alt="${name}">` 
+                : `<i class="fas fa-box wh-item-icon"></i>`;
+                
+            let spanStyle = 'aspect-ratio: 1 / 1;';
+            if (slotsPerStack === 2) spanStyle = 'grid-column: span 2; aspect-ratio: 2 / 1;';
+            else if (slotsPerStack === 3) spanStyle = 'grid-column: span 3; aspect-ratio: 3 / 1;';
+            else if (slotsPerStack === 4) spanStyle = 'grid-column: span 2; grid-row: span 2; aspect-ratio: 1 / 1;';
+            else if (slotsPerStack === 6) spanStyle = 'grid-column: span 3; grid-row: span 2; aspect-ratio: 3 / 2;';
+            else if (slotsPerStack === 8) spanStyle = 'grid-column: span 4; grid-row: span 2; aspect-ratio: 2 / 1;';
+            else if (slotsPerStack > 1) spanStyle = `grid-column: span ${slotsPerStack}; aspect-ratio: ${slotsPerStack} / 1;`;
+
+            slotsHtml += `
+                <div class="wh-slot" style="${spanStyle}" title="${name}\nIlość w tym slocie: ${qtyInThisStack} / ${maxStack}\nZajmuje: ${slotsPerStack} slot(ów)">
+                    ${imageHtml}
+                    <span class="wh-item-qty">x${qtyInThisStack}</span>
+                </div>
+            `;
+            
+            remainingQty -= qtyInThisStack;
+        }
+    }
+    
+    // Dopełnianie pustymi kafelkami (bazujemy na WYŚWIETLANYCH przedmiotach)
+    const baseLimit = Math.ceil(displayedUsedSlots / 10) * 10;
+    const emptySlotsNeeded = (baseLimit - displayedUsedSlots) + 100;
+    
+    for(let i = 0; i < emptySlotsNeeded; i++) {
+        slotsHtml += `<div class="wh-slot empty" style="aspect-ratio: 1 / 1;"></div>`;
+    }
+    
+    grid.innerHTML = slotsHtml;
+    
+    // Aktualizacja całkowitych statystyk (pokażą pełny magazyn, mimo włączonego filtra!)
+    maxEl.innerText = MAX_WAREHOUSE_SLOTS;
+    usedEl.innerText = totalUsedSlots;
+    
+    let percent = (totalUsedSlots / MAX_WAREHOUSE_SLOTS) * 100;
+    if (percent > 100) percent = 100;
+    const roundedPercent = Math.round(percent);
+    
+    if (progressEl) progressEl.style.width = `${roundedPercent}%`;
+    if (percentTextEl) percentTextEl.innerText = `${roundedPercent}%`;
+    
+    if (progressEl) {
+        if (roundedPercent >= 90) progressEl.style.background = 'var(--danger)';
+        else if (roundedPercent >= 70) progressEl.style.background = 'var(--warning)';
+        else progressEl.style.background = 'var(--success)';
+    }
+};
+
+window.openWarehouse = async function() {
+    document.getElementById('user-dropdown').classList.remove('active');
+    document.getElementById('warehouse-modal').classList.add('active');
+    
+    // Ustawiamy ekran ładowania
+    const grid = document.getElementById('warehouse-grid');
+    if (grid) grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: var(--accent-color);"><i class="fas fa-circle-notch fa-spin fa-3x"></i><p style="margin-top: 15px;">Synchronizacja z bazą danych...</p></div>';
+    
+    // KRYTYCZNE: Zawsze wymuszamy świeże dane z bazy przy otwieraniu okna magazynu!
+    window.reportsFetchPromise = null;
+    
+    await window.syncWarehouseFromDatabase();
+};
+
+// Nasłuchiwanie przycisków
+document.addEventListener('DOMContentLoaded', () => {
+	// Nasłuchiwacz do wyszukiwarki w wirtualnym magazynie
+    document.getElementById('warehouse-search-input')?.addEventListener('input', window.renderWarehouse);
+    document.getElementById('menu-warehouse')?.addEventListener('click', openWarehouse);
+    document.getElementById('close-warehouse-btn')?.addEventListener('click', () => {
+    document.getElementById('warehouse-modal').classList.remove('active');
+    });
+    
+    // Obsługa nowego przycisku odświeżania
+    document.getElementById('refresh-warehouse-btn')?.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const icon = btn.querySelector('i');
+        
+        // Odpalamy animację ładowania
+        btn.disabled = true;
+        if (icon) icon.classList.add('fa-spin');
+        btn.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Ładowanie...';
+        
+        // KRYTYCZNE: Czyścimy pamięć podręczną, aby wymusić fizyczne pobranie nowych danych z Google Sheets
+        window.reportsFetchPromise = null; 
+        
+        // Pobieramy zaktualizowane dane
+        await window.syncWarehouseFromDatabase();
+        
+        // Przywracamy przycisk
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-sync-alt"></i> Odśwież';
+        if (typeof showNotice === 'function') showNotice("Stan magazynu został zaktualizowany z bazy!", "success");
+    });
+
+    // Wywołanie przy starcie żeby zaktualizować % na górnym pasku przy logowaniu
+    setTimeout(window.syncWarehouseFromDatabase, 500); 
+});
+
+// =========================================================
+// SAMOUCZEK PRACOWNIKA (INTRO.JS) - OBSŁUGA OBU ZAKŁADEK
+// =========================================================
+window.startTutorial = function() {
+    const dropdown = document.getElementById('user-dropdown');
+    if (dropdown) dropdown.classList.remove('active');
+    
+    localStorage.setItem('elcartel_tutorial_seen', 'true');
+    
+    const tutorial = introJs();
+
+    // 1. Sprawdzamy w jakiej zakładce jesteśmy
+    const isSkup = currentActiveView === 'skup';
+    let tutorialSteps = [];
+
+    // Szukamy elementu z dynamiczną ceną na żywo
+    const dynamicSkupPrice = document.querySelector('#view-skup .item-card:not(.custom-card-special) .custom-item-price');
+    const dynamicExportPrice = document.querySelector('#view-export .item-card:not(.custom-item) .custom-price-input');
+
+    // 2. Ładujemy odpowiednią pulę celów
+    if (isSkup) {
+        tutorialSteps = [
+            { title: "Witaj w El Cartel! 👋", intro: "Ten krótki samouczek pokaże Ci, jak sprawnie obsługiwać kasę fiskalną. Kliknij <b>Dalej</b>, aby rozpocząć." },
+            { element: document.getElementById('nav-skup-btn'), title: "Kasa główna (skup)", intro: "To jest Twój domyślny ekran pracy. Tutaj przyjmujesz i wyceniasz przedmioty przyniesione przez klientów lombardu." },
+            { element: document.getElementById('nav-export-btn'), title: "Sprzedaż", intro: "W tej zakładce wyprzedajesz zebrany asortyment (np. do NPC lub klientowi jeśli coś od nas kupuje). Przedmioty stąd znikają z magazynu firmy." },
+            { element: document.getElementById('skup-categories'), title: "Kategorie asortymentu", intro: "Używaj tych przycisków, aby szybko zawęzić listę i znaleźć konkretny typ przedmiotu.", position: 'bottom' },
+            { element: document.querySelector('#view-skup .search-container'), title: "Błyskawiczna wyszukiwarka", intro: "Możesz zacząć wpisywać nazwę tutaj, a system ją odnajdzie. Działa też dodawanie (np. wpisz: złota moneta x3 i wciśnij Enter)." },
+            { element: document.getElementById('add-custom-slot-btn'), title: "Niestandardowy produkt", intro: "Jeśli klient przyniesie przedmiot spoza bazy, użyj tego przycisku.", position: 'top' },
+            { element: dynamicSkupPrice || document.body, title: "Dynamiczna cena", intro: "Niektóre przedmioty nie mają sztywnej ceny (np. dekodery). Wpisz w tym polu wynegocjowaną kwotę.", position: 'top' },
+            { element: document.getElementById('cart-toggle-btn'), title: "Koszyk transakcji", intro: "Każdy przedmiot, który dodasz ikonką '+', trafi do koszyka. Kliknij ten przycisk przed wydrukiem by go sprawdzić." },
+            { element: document.getElementById('customer-ssn-input')?.parentElement || document.body, title: "Karty lojalnościowe", intro: "Jeśli klient podał Ci swój numer <b>SSN</b>, wpisz go tutaj! System automatycznie przyzna mu pieczątki." },
+            { element: document.getElementById('final-price-input')?.parentElement || document.body, title: "Kwota transakcji", intro: "W tym polu wprowadź ostateczną sumę transakcji wynikającą z wyceny wszystkich dodanych przedmiotów." },
+            { element: document.getElementById('quote-btn'), title: "Wydruk paragonu", intro: "Kliknij ten przycisk, a system wygeneruje paragon i wyśle na Discord.<br><br><b>Miłej zmiany!</b>", position: 'top' }
+        ];
+    } else {
+        tutorialSteps = [
+            { title: "Witaj w dziale sprzedaży! 🚛", intro: "Ten krótki samouczek pokaże Ci różnice w wystawianiu raportów sprzedaży z magazynu." },
+            { element: document.getElementById('export-categories'), title: "Kategorie asortymentu", intro: "Używaj tych przycisków, aby szybko zawęzić listę i znaleźć to co chcesz sprzedać.", position: 'bottom' },
+            { element: document.querySelector('#view-export .search-container'), title: "Wyszukiwarka", intro: "Możesz od razu wyszukać przedmiot lub błyskawicznie go dodać wpisując np. (katana x2) i wciskając Enter." },
+            { element: document.getElementById('add-custom-slot-btn-export'), title: "Własny produkt", intro: "Sprzedajesz coś spoza katalogu? Użyj tego przycisku by dodać własny wpis na paragon.", position: 'top' },
+            { element: document.getElementById('cart-toggle-btn-export'), title: "Koszyk sprzedaży", intro: "Tu podejrzysz asortyment przygotowany do wydania." },
+            { element: document.getElementById('customer-ssn-input-export')?.parentElement || document.body, title: "SSN Nabywcy", intro: "Sprzedajesz towar graczowi? Wpisz jego SSN. Jeżeli wywozisz towar do NPC - zostaw te pole puste." },
+            { element: document.getElementById('quote-btn-export'), title: "Generuj raport", intro: "Kliknij, aby wysłać raport na Discord i automatycznie ściągnąć przedmioty ze stanu magazynowego.<br><br><b>Miłej sprzedaży!</b>", position: 'top' }
+        ];
+    }
+
+    tutorial.setOptions({
+        nextLabel: 'Dalej <i class="fas fa-chevron-right"></i>',
+        prevLabel: '<i class="fas fa-chevron-left"></i> Wstecz',
+        doneLabel: 'Zakończ <i class="fas fa-check"></i>',
+        showStepNumbers: false,
+        showBullets: true,
+        exitOnOverlayClick: false, 
+        scrollToElement: false, // KLUCZ: Wyłączamy scrollowanie przez Intro.js, robimy to ręcznie!
+        steps: tutorialSteps
+    });
+
+    tutorial.onbeforechange(function(targetElement) {
+        return new Promise((resolve) => {
+            const searchInput = isSkup ? document.getElementById('search-input') : document.getElementById('search-input-export');
+            if (searchInput && searchInput.value !== '') {
+                searchInput.value = '';
+                if (isSkup && typeof applyFilters === 'function') applyFilters();
+                if (!isSkup && typeof applyFiltersExport === 'function') applyFiltersExport();
+            }
+
+            if (targetElement && targetElement !== document.body) {
+                // Przewijamy stronę ręcznie na środek ekranu
+                targetElement.scrollIntoView({ behavior: 'auto', block: 'center' });
+                
+                // Czekamy 450ms, aż animacja paska nawigacji (0.4s) CAŁKOWICIE się zakończy
+                setTimeout(() => resolve(), 450);
+            } else {
+                resolve();
+            }
+        });
+    });
+
+    tutorial.onafterchange(function(targetElement) {
+        // Twarde wymuszenie odświeżenia pozycji dymka by zapobiec zjawisku "uciekającej ramki"
+        setTimeout(() => tutorial.refresh(), 100);
+        setTimeout(() => tutorial.refresh(), 400);
+    });
+
+    // Zabezpieczenie przed niewidocznym ciemnym tekstem - dynamiczny wybór koloru tła
+    const fixColors = () => {
+        const bgHex = isSkup ? '#1e293b' : '#2d1b1b';
+        document.querySelectorAll('.introjs-tooltip').forEach(t => {
+            t.style.setProperty('background-color', bgHex, 'important');
+            t.style.setProperty('color', '#ffffff', 'important');
+        });
+        document.querySelectorAll('.introjs-tooltiptext, .introjs-tooltiptext *').forEach(t => {
+            t.style.setProperty('color', '#ffffff', 'important');
+        });
+    };
+
+    tutorial.onchange(fixColors);
+    tutorial.onafterchange(fixColors);
+
+    tutorial.start();
+};
+
+// Nasłuchiwanie kliknięcia w nowe ikonki samouczka (obok kategorii)
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('tutorial-btn-skup')?.addEventListener('click', window.startTutorial);
+    document.getElementById('tutorial-btn-export')?.addEventListener('click', window.startTutorial);
+});
+
+window.syncWarehouseFromDatabase = async function() {
+    try {
+        const reports = await window.preloadReportsData();
+        virtualWarehouse = {};
+
+        // Ustaw datę i godzinę, od której chcesz zacząć zliczać prawdziwy magazyn.
+        // Przedmioty skupione/sprzedane przed tą datą zostaną zignorowane.
+        const resetTimestamp = parseDate("17.06.2026 00:00").getTime(); 
+
+        reports.forEach(row => {
+            if (!row.name || !row.type || !row.date) return;
+            if (row.type === 'changelog' || row.type === 'pager_message') return;
+
+            // Filtrowanie starych logów odpowiedzialnych za przepełnienie slotów
+            const rowTime = parseDate(row.date).getTime();
+            if (rowTime < resetTimestamp) return;
+
+            let rawName = String(row.name).trim();
+
+            // FIX: Zabezpieczenie przed błędami z wyszukiwarki.
+            // Konwertuje omyłkowe "Obrazy" na "Obrazy ścienne" w locie.
+            if (rawName.toLowerCase() === "obraz") {
+                rawName = "Obraz ścienny";
+            }
+
+            // Ignorujemy wielkość liter przy szukaniu przedmiotu, aby uniknąć duplikatów
+            const foundItem = defaultInventory.find(i => i.name.toLowerCase() === rawName.toLowerCase()) 
+                           || defaultExportInventory.find(i => i.name.toLowerCase() === rawName.toLowerCase());
+
+            const finalName = foundItem ? foundItem.name : rawName;
+
+            if (!virtualWarehouse[finalName]) {
+                virtualWarehouse[finalName] = { qty: 0, image: null };
+                if (foundItem && foundItem.image) virtualWarehouse[finalName].image = foundItem.image;
+            }
+
+            const qty = parseInt(row.qty) || 1;
+
+            if (row.type === 'skup') {
+                virtualWarehouse[finalName].qty += qty;
+            } else if (row.type === 'sprzedaz') {
+                virtualWarehouse[finalName].qty -= qty;
+            }
+        });
+
+        // Usuwanie przedmiotów, których ilość spadła do 0 lub poniżej
+        for (const name in virtualWarehouse) {
+            if (virtualWarehouse[name].qty <= 0) {
+                delete virtualWarehouse[name];
+            }
+        }
+
+        renderWarehouse();
+    } catch (e) {
+        console.error("Błąd synchronizacji magazynu z bazą:", e);
+    }
+};
+
+// ==========================================
+// AUTOMATYCZNE WYLOGOWANIE I BLOKADA PRZY ZAMKNIĘCIU OKNA
+// ==========================================
+window.addEventListener('beforeunload', function(e) {
+    let hasUnsavedItems = false;
+    
+    if (window.skupTabs) {
+        hasUnsavedItems = window.skupTabs.some(tab => Object.values(tab.counts || {}).reduce((a, b) => a + b, 0) > 0);
+    }
+    
+    if (!hasUnsavedItems && window.exportTabs) {
+        hasUnsavedItems = window.exportTabs.some(tab => Object.values(tab.countsExport || {}).reduce((a, b) => a + b, 0) > 0);
+    }
+
+    if (hasUnsavedItems) {
+        e.preventDefault();
+        e.returnValue = 'Masz otwarte i nieuzupełnione rachunki w koszyku! Na pewno chcesz opuścić stronę?';
+        return e.returnValue;
+    }
+
+    if (currentEmployeeName) {
+        fetch(REPORTS_API_URL, {
+            method: 'POST',
+            keepalive: true,
+            body: JSON.stringify({
+                action: 'save_log',
+				date: getFormattedDateTime(),
+                employee: currentEmployeeName,
+                type: 'WYLOGOWANIE',
+                description: 'Zamknięto kartę lub okno przeglądarki (automatyczne wylogowanie).'
+            })
+        });
     }
 });
